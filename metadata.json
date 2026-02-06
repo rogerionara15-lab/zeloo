@@ -1,0 +1,7 @@
+{
+  "name": "Zeloo - Manutenção Residencial Inteligente",
+  "description": "Plataforma de gestão de serviços de manutenção residencial por assinatura. Tecnologia, segurança e zelo pelo seu lar.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
