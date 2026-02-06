@@ -1,66 +1,43 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-import { GoogleGenAI, Type } from "@google/genai";
+function requireStringEnv(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${name} ausente`);
+  }
+  return value.trim();
+}
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = requireStringEnv(
+  import.meta.env.VITE_GEMINI_API_KEY,
+  "VITE_GEMINI_API_KEY"
+);
+
+const genAI = new GoogleGenerativeAI(apiKey);
+
+// Modelo leve e rápido (bom pra MVP)
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const SYSTEM_INSTRUCTION_CORE = `
 Você é o Engenheiro Chefe da Zeloo, uma plataforma premium de manutenção residencial.
-Seu conhecimento baseia-se em:
-1. NORMAS TÉCNICAS (ABNT): Segurança elétrica e hidráulica.
-2. ORÇAMENTAÇÃO (SINAPI): Valores referenciais da Caixa Econômica Federal para construção civil no Brasil.
-3. ATENDIMENTO: Tom profissional, zeloso e técnico.
-
-Ao gerar orçamentos: Liste itens de mão de obra e sugira materiais.
+Seu conhecimento baseia-se em normas técnicas (ABNT) e boas práticas.
+Explique o problema e oriente a melhor solução técnica de forma clara e profissional.
 `;
 
-export const getMaintenanceAdvice = async (issue: string) => {
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `O usuário relatou o seguinte problema em casa: "${issue}". Analise tecnicamente e explique como a Zeloo resolve isso.`,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION_CORE,
-      },
-    });
-    return response.text;
-  } catch (error) {
-    console.error(error);
-    return "Erro no diagnóstico. Tente novamente.";
-  }
-};
-
-export const generateBudget = async (data: {
-  serviceType: string;
-  description: string;
-  area: string;
-  location: string;
-  finishLevel: string;
-}) => {
+export async function getMaintenanceAdvice(issue: string): Promise<string> {
   try {
     const prompt = `
-      GERAR ORÇAMENTO TÉCNICO REFERENCIAL (BASE SINAPI)
-      SERVIÇO: ${data.serviceType}
-      DETALHES: ${data.description}
-      QUANTIDADE/ÁREA: ${data.area}
-      PADRÃO: ${data.finishLevel}
+${SYSTEM_INSTRUCTION_CORE}
 
-      Estruture a resposta com:
-      1. Descrição dos Serviços
-      2. Estimativa de Horas/Homem
-      3. Valor Referencial Total
-      4. Observações Técnicas
-    `;
+O usuário relatou o seguinte problema:
+"${issue}"
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION_CORE,
-      },
-    });
-    return response.text;
+Responda com diagnóstico, possíveis causas e próximos passos.
+`;
+
+    const result = await model.generateContent(prompt);
+    return result.response.text();
   } catch (error) {
-    console.error(error);
-    return "Falha ao processar orçamento SINAPI.";
+    console.error("Erro Gemini:", error);
+    return "Erro ao consultar o assistente técnico.";
   }
-};
+}
