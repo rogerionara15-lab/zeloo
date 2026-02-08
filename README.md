@@ -1,20 +1,25 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Zeloo — Manutenção Residencial Inteligente
 
-# Run and deploy your AI Studio app
+## Status do Projeto
+✔ Frontend funcionando (Vite + React + TS)  
+✔ Supabase configurado (Auth + Database)  
+✔ Backend Vercel com API Routes  
+✔ Atualização automática de payment_status funcionando  
 
-This contains everything you need to run your app locally.
+## Estrutura Importante
 
-View your app in AI Studio: https://ai.studio/apps/drive/1yNeYuXF7hICuqAntChAeVeo1KtbeOHHW
+### Frontend
+- services/supabaseClient.ts → conexão segura com Supabase (anon)
 
-## Run Locally
+### Backend (Vercel)
+- api/ping.ts → teste da API
+- api/supabase-health.ts → teste Supabase no backend
+- api/admin-set-paid.ts → simula liberação de pagamento (PAID)
 
-**Prerequisites:**  Node.js
+## Lógica de Pagamento
+- Campo: profiles.payment_status
+- Valores esperados: PENDING | PAID
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Observação
+- Mercado Pago ainda não integrado
+- Webhook será conectado ao admin-set-paid futuramente
