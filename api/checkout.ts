@@ -16,12 +16,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const { title, price, quantity } = req.body ?? {};
+    const { title, price, quantity } = (req.body ?? {}) as {
+      title?: string;
+      price?: number;
+      quantity?: number;
+    };
 
     if (!title || typeof title !== "string") {
       return res.status(400).json({ ok: false, error: "title inválido" });
     }
-    if (typeof price !== "number" || price <= 0) {
+
+    if (typeof price !== "number" || Number.isNaN(price) || price <= 0) {
       return res.status(400).json({ ok: false, error: "price inválido" });
     }
 
