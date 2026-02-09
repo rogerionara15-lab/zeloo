@@ -20,11 +20,13 @@ const accessToken = accessTokenRaw.trim();
     }
 
     // 3) Lê e valida o body
-    const { title, price, quantity } = (req.body ?? {}) as {
-      title?: string;
-      price?: number;
-      quantity?: number;
-    };
+    const { title, price, quantity, userId } = (req.body ?? {}) as {
+  title?: string;
+  price?: number;
+  quantity?: number;
+  userId?: string;
+};
+
 
     if (!title || typeof title !== "string") {
       return res.status(400).json({ ok: false, error: "title inválido" });
