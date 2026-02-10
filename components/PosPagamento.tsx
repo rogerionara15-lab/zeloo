@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { supabase } from "../services/supabaseClient";
 
 type PosPagamentoProps = {
@@ -7,12 +8,19 @@ type PosPagamentoProps = {
 };
 
 const PosPagamento: React.FC<PosPagamentoProps> = ({ onBack, onApproved }) => {
+  const location = useLocation();
+
+  const queryEmail = useMemo(() => {
+    const qs = new URLSearchParams(location.search);
+    return (qs.get("email") || "").trim().toLowerCase();
+  }, [location.search]);
+
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"IDLE" | "CHECKING" | "APPROVED" | "PENDING" | "ERROR">("IDLE");
   const [loading, setLoading] = useState(false);
 
-  const checkPaid = async () => {
-    const cleanEmail = email.trim().toLowerCase();
+  const checkPaid = async (emailToCheck?: string) => {
+    const cleanEmail = (emailToCheck ?? email).trim().toLowerCase();
 
     if (!cleanEmail || !cleanEmail.includes("@")) {
       alert("Digite o e-mail usado no pagamento.");
@@ -23,15 +31,20 @@ const PosPagamento: React.FC<PosPagamentoProps> = ({ onBack, onApproved }) => {
     setLoading(true);
 
     try {
+      // Pega o registro mais recente daquele email (se existir mais de um)
       const { data, error } = await supabase
         .from("paid_access")
-        .select("status")
+        .select("status, paid_at, payment_id")
         .eq("email", cleanEmail)
+        .order("paid_at", { ascending: false, nullsFirst: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) throw error;
 
-      if (data?.status === "APPROVED") {
+      const paidStatus = String(data?.status || "").toUpperCase();
+
+      if (paidStatus === "APPROVED") {
         setStatus("APPROVED");
       } else {
         setStatus("PENDING");
@@ -43,6 +56,18 @@ const PosPagamento: React.FC<PosPagamentoProps> = ({ onBack, onApproved }) => {
       setLoading(false);
     }
   };
+
+  // ✅ Se veio email na URL, preenche e já inicia a checagem
+  useEffect(() => {
+    if (!queryEmail || !queryEmail.includes("@")) return;
+
+    setEmail(queryEmail);
+
+    // dispara automaticamente 1x ao abrir
+    // (não precisa do usuário clicar)
+    checkPaid(queryEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryEmail]);
 
   // ✅ fica verificando automaticamente quando status estiver pending/checking
   useEffect(() => {
@@ -70,7 +95,8 @@ const PosPagamento: React.FC<PosPagamentoProps> = ({ onBack, onApproved }) => {
         </div>
 
         <p className="text-sm text-slate-600">
-          Como o PIX às vezes não volta sozinho para o site, confirme aqui com o e-mail usado no pagamento.
+          Se você pagou por PIX e não voltou automaticamente para o site, confirme aqui.
+          Se o pagamento foi aprovado, o botão de criar conta vai aparecer.
         </p>
 
         <div className="space-y-2">
@@ -114,7 +140,7 @@ const PosPagamento: React.FC<PosPagamentoProps> = ({ onBack, onApproved }) => {
         )}
 
         <button
-          onClick={checkPaid}
+          onClick={() => checkPaid()}
           disabled={loading}
           className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase"
         >

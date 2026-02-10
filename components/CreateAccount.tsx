@@ -1,20 +1,47 @@
-
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
 interface CreateAccountProps {
-  onFinalize: (credentials: { email: string, password: string }) => void;
+  onFinalize: (credentials: { email: string; password: string }) => void;
   onCancel: () => void;
+
+  // opcional: se você quiser passar por prop (não é obrigatório)
+  defaultEmail?: string;
 }
 
-const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel }) => {
+const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, defaultEmail }) => {
+  const location = useLocation();
+
+  const emailFromUrl = useMemo(() => {
+    const qs = new URLSearchParams(location.search);
+    return (qs.get('email') || '').trim().toLowerCase();
+  }, [location.search]);
+
+  const lockedEmail = useMemo(() => {
+    const e = (defaultEmail || emailFromUrl || '').trim().toLowerCase();
+    return e && e.includes('@') ? e : '';
+  }, [defaultEmail, emailFromUrl]);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ Preenche email automaticamente se veio da URL
+  useEffect(() => {
+    if (lockedEmail) setEmail(lockedEmail);
+  }, [lockedEmail]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setError('Informe um e-mail válido.');
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError('As senhas não coincidem.');
@@ -26,7 +53,7 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel }) =
       return;
     }
 
-    onFinalize({ email, password });
+    onFinalize({ email: cleanEmail, password });
   };
 
   return (
@@ -35,30 +62,43 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel }) =
         <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-20 h-20 bg-emerald-500 text-white rounded-3xl flex items-center justify-center text-4xl shadow-xl shadow-emerald-200">
           🔑
         </div>
-        
+
         <div className="text-center mb-10 mt-6">
           <h1 className="text-3xl font-black text-slate-900 mb-2">Configure seu Acesso</h1>
-          <p className="text-slate-400 font-medium">Finalize seu cadastro definindo seu e-mail de login e senha.</p>
+          <p className="text-slate-400 font-medium">
+            Finalize seu cadastro definindo sua senha.
+            {lockedEmail ? ' Seu e-mail já foi vinculado ao pagamento.' : ''}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">E-mail de Login</label>
-            <input 
-              required 
-              type="email" 
+            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">
+              E-mail de Login
+            </label>
+            <input
+              required
+              type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
               placeholder="exemplo@email.com"
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 outline-none transition-all font-bold"
+              readOnly={!!lockedEmail}
+              className={`w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm outline-none transition-all font-bold
+                focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600
+                ${lockedEmail ? 'opacity-80 cursor-not-allowed' : ''}`}
             />
+            {lockedEmail && (
+              <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-300">
+                Este e-mail veio do pagamento e não pode ser alterado.
+              </p>
+            )}
           </div>
 
           <div>
             <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">Senha</label>
-            <input 
-              required 
-              type="password" 
+            <input
+              required
+              type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="••••••••"
@@ -68,9 +108,9 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel }) =
 
           <div>
             <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">Confirmar Senha</label>
-            <input 
-              required 
-              type="password" 
+            <input
+              required
+              type="password"
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
               placeholder="••••••••"
@@ -84,12 +124,20 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel }) =
             </div>
           )}
 
-          <div className="pt-4">
-            <button 
+          <div className="pt-4 space-y-3">
+            <button
               type="submit"
               className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3"
             >
               Criar Minha Conta Zeloo
+            </button>
+
+            <button
+              type="button"
+              onClick={onCancel}
+              className="w-full py-4 bg-slate-100 text-slate-700 rounded-[2rem] font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
+            >
+              Voltar
             </button>
           </div>
         </form>

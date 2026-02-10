@@ -1,6 +1,16 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
+function getBaseUrl(req: VercelRequest) {
+  // tenta montar a URL dinamicamente (bom pra preview deployments)
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const proto = (req.headers["x-forwarded-proto"] as string) || "https";
+
+  if (host) return `${proto}://${host}`;
+  // fallback seguro
+  return "https://zeloo-gamma.vercel.app";
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 1) Aceita somente POST
   if (req.method !== "POST") {
@@ -54,9 +64,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     ];
 
-    // 6) URLs
-    const baseUrl = "https://zeloo-gamma.vercel.app";
-    const successUrl = `${baseUrl}/pos-pagamento?email=${encodeURIComponent(payerEmail)}`;
+    // 6) URLs (base dinâmica + fallback)
+    const baseUrl = getBaseUrl(req);
+
+    const posPagamentoUrl = `${baseUrl}/pos-pagamento?email=${encodeURIComponent(payerEmail)}`;
+    const failureUrl = `${baseUrl}/?payment=failure&email=${encodeURIComponent(payerEmail)}`;
 
     // 7) Cria preference
     const prefResp = await preference.create({
@@ -66,16 +78,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 🔥 garante webhook na Vercel (não depende do painel)
         notification_url: `${baseUrl}/api/mercadopago/webhook`,
 
-        // 🔥 identificação do comprador para liberação
+        // 🔥 identificação do comprador para liberação (use isso no webhook!)
         external_reference: payerEmail,
 
+        // 🔥 ajuda a preencher dados do pagador
         payer: { email: payerEmail },
 
+        // ✅ retorno do MP
         back_urls: {
-          success: successUrl,
-          pending: successUrl,
-          failure: successUrl,
+          success: posPagamentoUrl,
+          pending: posPagamentoUrl,
+          failure: failureUrl,
         },
+
+        // ✅ tenta voltar automaticamente quando aprovado (quando aplicável)
+        auto_return: "approved",
       },
     });
 

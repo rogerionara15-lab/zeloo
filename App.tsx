@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+
 import Header from './components/Header';
 import Hero from './components/Hero';
 import Services from './components/Services';
@@ -61,7 +63,16 @@ const parsePtBrDate = (s: string): Date | null => {
 const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 // const ARCHIVE_AFTER_MS = 10_000;
 
-const App: React.FC = () => {
+// ✅ util: pegar querystring
+const useQuery = () => {
+  const { search } = useLocation();
+  return new URLSearchParams(search);
+};
+
+const AppInner: React.FC = () => {
+  const navigate = useNavigate();
+  const query = useQuery();
+
   const [view, setView] = useState<string>('LANDING');
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showExpress, setShowExpress] = useState(false);
@@ -356,7 +367,77 @@ const App: React.FC = () => {
   const currentUserLive = currentUser ? (registeredUsers.find(u => u.id === currentUser.id) || currentUser) : null;
   const canAccessDashboard = !!currentUserLive && currentUserLive.paymentStatus === 'PAID' && !currentUserLive.isBlocked;
 
-  return (
+  // ✅ Rotas reais: /pos-pagamento e /criar-conta
+  // Se o Mercado Pago voltar pra essas URLs, NÃO dá 404 e o fluxo continua.
+  const RoutePosPagamento = () => {
+    const emailFromUrl = query.get('email') || '';
+
+    return (
+      <PosPagamento
+        onBack={() => navigate('/')}
+        onApproved={(email) => {
+          const finalEmail = email || emailFromUrl;
+
+          setPendingRegistration((prev: any) => ({
+            ...(prev || {}),
+            email: finalEmail,
+            paymentStatus: 'PAID',
+          }));
+
+          navigate(`/criar-conta?email=${encodeURIComponent(finalEmail)}`);
+        }}
+      />
+    );
+  };
+
+  const RouteCriarConta = () => {
+    const emailFromUrl = query.get('email') || pendingRegistration?.email || '';
+
+    return (
+      <CreateAccount
+        onFinalize={(creds) => {
+          const newUser: UserRegistration = {
+            ...pendingRegistration,
+            id: `user-${Date.now()}`,
+            email: creds.email || emailFromUrl,
+            password: creds.password,
+            date: new Date().toLocaleDateString('pt-BR'),
+            dueDate: 'Ativo',
+            isBlocked: false,
+            extraVisitsPurchased: 0
+          };
+
+          setRegisteredUsers(prev => [...prev, newUser]);
+
+          if (newUser.paymentStatus === 'PAID') {
+            setCurrentUser(newUser);
+            // mantém seu comportamento atual
+            navigateTo('DASHBOARD');
+            // volta pra home “rota /” mas view vira DASHBOARD (sem quebrar o layout)
+            navigate('/');
+            return;
+          }
+
+          setCurrentUser(null);
+          alert('Cadastro criado ✅ Agora envie o comprovante e aguarde a auditoria para liberar o acesso.');
+          navigate('/');
+          navigateTo('LANDING');
+          setShowLoginModal(true);
+        }}
+        onCancel={() => {
+          navigate('/');
+          navigateTo('LANDING');
+        }}
+        // ⚠️ Não sei se seu CreateAccount aceita essa prop.
+        // Se ele aceitar, ótimo. Se não aceitar, a gente ajusta depois no próprio CreateAccount.tsx.
+        // @ts-ignore
+        defaultEmail={emailFromUrl}
+      />
+    );
+  };
+
+  // ✅ A home (rota /) mantém seu sistema antigo por view
+  const HomeByView = () => (
     <div className="min-h-screen flex flex-col bg-slate-50 selection:bg-indigo-600 selection:text-white">
       {view === 'LANDING' && <Header onOpenLogin={() => setShowLoginModal(true)} />}
 
@@ -533,14 +614,13 @@ const App: React.FC = () => {
               )}
 
               {view === 'PAYMENT_SUCCESS' && (
-  <PaymentSuccess
-    planName={selectedPlan?.name || ''}
-    paymentStatus={pendingRegistration?.paymentStatus}
-    onContinue={() => navigateTo('CREATE_ACCOUNT')}
-    onConfirmPayment={() => navigateTo('POS_PAGAMENTO')}
-  />
-)}
-
+                <PaymentSuccess
+                  planName={selectedPlan?.name || ''}
+                  paymentStatus={pendingRegistration?.paymentStatus}
+                  onContinue={() => navigateTo('CREATE_ACCOUNT')}
+                  onConfirmPayment={() => navigate('/pos-pagamento')}
+                />
+              )}
 
               {/* ✅ NOVA TELA: CONFIRMAR PAGAMENTO (PIX) */}
               {view === 'POS_PAGAMENTO' && (
@@ -624,6 +704,24 @@ const App: React.FC = () => {
         />
       )}
     </div>
+  );
+
+  return null;
+};
+
+const App: React.FC = () => {
+  return (
+    <Routes>
+      {/* Rotas reais para retorno do Mercado Pago */}
+      <Route path="/pos-pagamento" element={<AppInner />} />
+      <Route path="/criar-conta" element={<AppInner />} />
+
+      {/* Home (SPA) */}
+      <Route path="/" element={<AppInner />} />
+
+      {/* fallback */}
+      <Route path="*" element={<AppInner />} />
+    </Routes>
   );
 };
 
