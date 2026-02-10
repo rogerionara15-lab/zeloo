@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from "react";
-import { supabase } from "../services/supabaseClient";
 import { PlanDetails, AdminProfile } from "../types";
 
 interface CheckoutProps {
@@ -40,16 +39,14 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
     setLoading(true);
 
     try {
-      // 1) Pegar a sessão atual (getSession)
-      const email = formData.email?.trim().toLowerCase();
+      // Fluxo "paga primeiro -> cria login depois": NÃO existe sessão aqui.
+      const email = (formData.email || "").trim().toLowerCase();
 
-if (!email) {
-  alert("Informe seu e-mail para continuar.");
-  return;
-}
+      if (!email || !email.includes("@")) {
+        alert("Informe um e-mail válido para continuar.");
+        return;
+      }
 
-
-      // 3) Chamar seu backend /api/checkout (Mercado Pago)
       const resp = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,8 +54,7 @@ if (!email) {
           title: `Zeloo Premium - ${plan.name}`,
           price: Number(contractValue),
           quantity: 1,
-          email: formData.email,
- // vira external_reference no backend
+          email, // vai virar external_reference no backend
         }),
       });
 
@@ -77,7 +73,7 @@ if (!email) {
         return;
       }
 
-      // 4) Redirecionar para o Mercado Pago
+      // Checkout Pro: redireciona pro Mercado Pago (PIX/QR/Cartão aparecem lá)
       window.location.href = json.init_point;
     } catch (err: any) {
       console.error("Erro inesperado no checkout:", err);
@@ -113,6 +109,7 @@ if (!email) {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
               />
+
               <div className="grid grid-cols-2 gap-4">
                 <input
                   required
@@ -132,6 +129,7 @@ if (!email) {
                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
                 />
               </div>
+
               <input
                 required
                 placeholder="Endereço"
@@ -140,6 +138,7 @@ if (!email) {
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
               />
+
               <button
                 type="submit"
                 className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-indigo-700 transition-all"
