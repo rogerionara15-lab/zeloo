@@ -94,16 +94,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // upsert por email (evita duplicar)
       const { error } = await supabase
-        .from("paid_access")
-        .upsert(
-          {
-            email,
-            status: "APPROVED",
-            payment_id: String(payment?.id ?? paymentId),
-            paid_at: new Date().toISOString(),
-          },
-          { onConflict: "email" }
-        );
+  .from("paid_access")
+  .upsert(
+    {
+      email,
+      status: "APPROVED",
+      payment_id: String(payment?.id ?? paymentId),
+    },
+    { onConflict: "email" }
+  );
+
 
       if (error) {
         console.log("WEBHOOK SUPABASE ERROR:", error);
