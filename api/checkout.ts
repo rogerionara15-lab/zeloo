@@ -8,10 +8,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // 2) Pega o token do Mercado Pago (variável de ambiente)
-    const accessTokenRaw = process.env.MERCADOPAGO_ACCESS_TOKEN ?? "";
-    const accessToken = accessTokenRaw.trim();
-
+    // 2) Token MP
+    const accessToken = (process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
     if (!accessToken) {
       return res.status(500).json({
         ok: false,
@@ -19,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // 3) Lê e valida o body
+    // 3) Body
     const { title, price, quantity, email } = (req.body ?? {}) as {
       title?: string;
       price?: number;
@@ -35,49 +33,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ ok: false, error: "price inválido" });
     }
 
-    if (!email || typeof email !== "string") {
-      return res.status(400).json({ ok: false, error: "email inválido" });
-    }
-
-    const payerEmail = email.trim().toLowerCase();
-    if (!payerEmail.includes("@")) {
+    const payerEmail = String(email ?? "").trim().toLowerCase();
+    if (!payerEmail || !payerEmail.includes("@")) {
       return res.status(400).json({ ok: false, error: "email inválido" });
     }
 
     const qty = typeof quantity === "number" && quantity > 0 ? quantity : 1;
 
-    // 4) Configura SDK Mercado Pago
+    // 4) SDK MP
     const client = new MercadoPagoConfig({ accessToken });
     const preference = new Preference(client);
 
-    // 5) Itens do checkout
+    // 5) Itens (tipado como any pra não brigar com TS)
     const items: any[] = [
       {
-        title: title,
+        title,
         quantity: qty,
         unit_price: price,
         currency_id: "BRL",
       },
     ];
 
-    // 6) Cria a preferência
+    // 6) URLs
+    const baseUrl = "https://zeloo-gamma.vercel.app";
+    const successUrl = `${baseUrl}/pos-pagamento?email=${encodeURIComponent(payerEmail)}`;
+
+    // 7) Cria preference
     const prefResp = await preference.create({
       body: {
-        items: items,
-        payer: {
-          email: payerEmail,
-        },
+        items,
+
+        // 🔥 garante webhook na Vercel (não depende do painel)
+        notification_url: `${baseUrl}/api/mercadopago/webhook`,
+
+        // 🔥 identificação do comprador para liberação
         external_reference: payerEmail,
+
+        payer: { email: payerEmail },
+
         back_urls: {
-          success: "https://zeloo-gamma.vercel.app/",
-          pending: "https://zeloo-gamma.vercel.app/",
-          failure: "https://zeloo-gamma.vercel.app/",
+          success: successUrl,
+          pending: successUrl,
+          failure: successUrl,
         },
-        auto_return: "approved",
       },
     });
 
-    // 7) Alguns SDKs retornam dentro de ".body"
+    // 8) alguns SDKs retornam dentro de ".body"
     const pref: any = (prefResp as any)?.body ?? prefResp;
 
     return res.status(200).json({
