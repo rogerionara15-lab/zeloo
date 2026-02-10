@@ -25,8 +25,9 @@ import TermsOfUse from './components/TermsOfUse';
 import FAQ from './components/FAQ';
 import ContactConsultant from './components/ContactConsultant';
 import ZelooExpress from './components/ZelooExpress';
+import PosPagamento from './components/PosPagamento';
+
 import {
-  
   PlanDetails,
   UserRegistration,
   AdminProfile,
@@ -87,22 +88,21 @@ const App: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => getFromLocal('chat_messages', []));
 
   const [availablePlans] = useState<PlanDetails[]>([
-      {
-    name: 'Plano Teste (R$ 1)',
-    tier: 'Mensal',
-    price: 'R$ 1',
-    period: '/mês',
-    features: [
-      'Teste do pagamento',
-      'Verificação do webhook',
-      'Liberação automática (teste)',
-    ],
-    highlight: false,
-    save: 'Plano temporário para teste',
-  },
+    {
+      name: 'Plano Teste (R$ 1)',
+      tier: 'Mensal',
+      price: 'R$ 1',
+      period: '/mês',
+      features: [
+        'Teste do pagamento',
+        'Verificação do webhook',
+        'Liberação automática (teste)',
+      ],
+      highlight: false,
+      save: 'Plano temporário para teste',
+    },
 
     {
-      
       name: 'Central Essencial Residencial',
       tier: 'Mensal',
       price: 'R$ 300',
@@ -134,7 +134,6 @@ const App: React.FC = () => {
       highlight: false
     },
     {
-      
       name: 'Central Essencial Condomínio',
       tier: 'Sob consulta',
       price: 'A partir de R$ 1500',
@@ -200,7 +199,7 @@ const App: React.FC = () => {
 
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const navigateTo = useCallback((newView: string) => {
     setView(newView);
@@ -384,7 +383,6 @@ const App: React.FC = () => {
             />
             <MobileAppVision
               onOpenDashboard={() => {
-                // ✅ Não deixa abrir painel se não estiver PAID
                 if (canAccessDashboard) navigateTo('DASHBOARD');
                 else setShowLoginModal(true);
               }}
@@ -417,8 +415,6 @@ const App: React.FC = () => {
                 onAuthRequired={() => setShowLoginModal(true)}
               />
             )}
-                
-
           </div>
         )}
 
@@ -537,10 +533,27 @@ const App: React.FC = () => {
               )}
 
               {view === 'PAYMENT_SUCCESS' && (
-                <PaymentSuccess
-                  planName={selectedPlan?.name || ''}
-                  onContinue={() => navigateTo('CREATE_ACCOUNT')}
-                  paymentStatus={pendingRegistration?.paymentStatus}
+  <PaymentSuccess
+    planName={selectedPlan?.name || ''}
+    paymentStatus={pendingRegistration?.paymentStatus}
+    onContinue={() => navigateTo('CREATE_ACCOUNT')}
+    onConfirmPayment={() => navigateTo('POS_PAGAMENTO')}
+  />
+)}
+
+
+              {/* ✅ NOVA TELA: CONFIRMAR PAGAMENTO (PIX) */}
+              {view === 'POS_PAGAMENTO' && (
+                <PosPagamento
+                  onBack={() => navigateTo('LANDING')}
+                  onApproved={(email) => {
+                    setPendingRegistration((prev: any) => ({
+                      ...(prev || {}),
+                      email,
+                      paymentStatus: 'PAID',
+                    }));
+                    navigateTo('CREATE_ACCOUNT');
+                  }}
                 />
               )}
 
@@ -561,14 +574,12 @@ const App: React.FC = () => {
 
                     setRegisteredUsers(prev => [...prev, newUser]);
 
-                    // ✅ Só entra se já estiver PAID (caso raro quando tiver gateway automático no futuro)
                     if (newUser.paymentStatus === 'PAID') {
                       setCurrentUser(newUser);
                       navigateTo('DASHBOARD');
                       return;
                     }
 
-                    // ✅ Caso normal (sem gateway): fica em auditoria e NÃO entra
                     setCurrentUser(null);
                     alert('Cadastro criado ✅ Agora envie o comprovante e aguarde a auditoria para liberar o acesso.');
                     navigateTo('LANDING');
