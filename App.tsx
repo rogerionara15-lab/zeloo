@@ -87,7 +87,22 @@ const App: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => getFromLocal('chat_messages', []));
 
   const [availablePlans] = useState<PlanDetails[]>([
+      {
+    name: 'Plano Teste (R$ 1)',
+    tier: 'Mensal',
+    price: 'R$ 1',
+    period: '/mês',
+    features: [
+      'Teste do pagamento',
+      'Verificação do webhook',
+      'Liberação automática (teste)',
+    ],
+    highlight: false,
+    save: 'Plano temporário para teste',
+  },
+
     {
+      
       name: 'Central Essencial Residencial',
       tier: 'Mensal',
       price: 'R$ 300',
@@ -119,6 +134,7 @@ const App: React.FC = () => {
       highlight: false
     },
     {
+      
       name: 'Central Essencial Condomínio',
       tier: 'Sob consulta',
       price: 'A partir de R$ 1500',
