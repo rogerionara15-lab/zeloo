@@ -1,59 +1,121 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createClient } from "@supabase/supabase-js";
 import { MercadoPagoConfig, Payment } from "mercadopago";
+import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // MP chama via POST. GET no navegador é só teste.
   if (req.method !== "POST") {
-    return res.status(405).json({ ok: false });
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
   try {
-    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // ✅ LOG 1: confirma que o webhook está sendo chamado
+    console.log("WEBHOOK HIT:", {
+      method: req.method,
+      query: req.query,
+      headers: {
+        "content-type": req.headers["content-type"],
+        "user-agent": req.headers["user-agent"],
+      },
+    });
 
-    if (!accessToken || !supabaseUrl || !serviceRoleKey) {
-      throw new Error("Variáveis de ambiente ausentes");
+    // Body pode vir como objeto ou string
+    let body: any = req.body;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        // mantém string
+      }
     }
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
-    const client = new MercadoPagoConfig({ accessToken });
-    const paymentApi = new Payment(client);
+    console.log("WEBHOOK BODY RAW:", body);
 
-    const paymentId =
-      req.body?.data?.id ||
-      req.query?.["data.id"] ||
-      req.body?.id;
+    // 1) Capturar paymentId em vários formatos
+    let paymentId: string | undefined =
+      body?.data?.id ||
+      body?.id ||
+      (typeof req.query?.["data.id"] === "string" ? (req.query["data.id"] as string) : undefined);
+
+    // Às vezes vem `resource` como URL
+    const resource: string | undefined = body?.resource;
+    if (!paymentId && resource && typeof resource === "string") {
+      const match = resource.match(/\/v1\/payments\/(\d+)/) || resource.match(/\/payments\/(\d+)/);
+      if (match?.[1]) paymentId = match[1];
+    }
 
     if (!paymentId) {
+      console.log("WEBHOOK: paymentId não encontrado. Nada a fazer.");
+      // Retorna 200 pra não ficar re-tentando sem necessidade
       return res.status(200).json({ ok: true });
     }
 
-    const payment = await paymentApi.get({ id: String(paymentId) });
-
-    if (payment.status !== "approved") {
+    const accessToken = (process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
+    if (!accessToken) {
+      console.log("WEBHOOK: MERCADOPAGO_ACCESS_TOKEN ausente");
       return res.status(200).json({ ok: true });
     }
 
-    const email =
-      payment.payer?.email?.toLowerCase()?.trim();
+    // 2) Buscar o pagamento completo no MP
+    const mp = new MercadoPagoConfig({ accessToken });
+    const paymentApi = new Payment(mp);
 
-    if (!email) {
-      throw new Error("Email do pagador não encontrado");
+    const paymentResp = await paymentApi.get({ id: String(paymentId) });
+    const payment: any = (paymentResp as any)?.body ?? paymentResp;
+
+    console.log("WEBHOOK PAYMENT STATUS:", {
+      id: payment?.id,
+      status: payment?.status,
+      external_reference: payment?.external_reference,
+      payer_email: payment?.payer?.email,
+    });
+
+    // 3) Pegar email (preferir external_reference)
+    const externalRef = String(payment?.external_reference || "").trim().toLowerCase();
+    const payerEmail = String(payment?.payer?.email || "").trim().toLowerCase();
+    const email = externalRef || payerEmail;
+
+    if (!email || !email.includes("@")) {
+      console.log("WEBHOOK: email não encontrado no pagamento.");
+      return res.status(200).json({ ok: true });
     }
 
-    await supabase
-      .from("paid_access")
-      .upsert({
-        email,
-        payment_id: String(payment.id),
-        status: "APPROVED",
-        raw: payment,
-      });
+    // 4) Se aprovado, grava no Supabase
+    if (payment?.status === "approved") {
+      const supabaseUrl = (process.env.SUPABASE_URL ?? "").trim();
+      const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
+
+      if (!supabaseUrl || !serviceRoleKey) {
+        console.log("WEBHOOK: SUPABASE env ausente.");
+        return res.status(200).json({ ok: true });
+      }
+
+      const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+      // upsert por email (evita duplicar)
+      const { error } = await supabase
+        .from("paid_access")
+        .upsert(
+          {
+            email,
+            status: "APPROVED",
+            payment_id: String(payment?.id ?? paymentId),
+            paid_at: new Date().toISOString(),
+          },
+          { onConflict: "email" }
+        );
+
+      if (error) {
+        console.log("WEBHOOK SUPABASE ERROR:", error);
+      } else {
+        console.log("WEBHOOK: paid_access atualizado com sucesso:", email);
+      }
+    }
 
     return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error("WEBHOOK ERROR:", err);
+  } catch (e: any) {
+    console.log("WEBHOOK ERROR:", e?.message || e);
+    // 200 pra evitar loop agressivo de retries enquanto debugamos
     return res.status(200).json({ ok: true });
   }
 }
