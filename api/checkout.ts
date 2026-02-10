@@ -10,7 +10,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // 2) Pega o token do Mercado Pago (variável de ambiente)
     const accessTokenRaw = process.env.MERCADOPAGO_ACCESS_TOKEN ?? "";
-const accessToken = accessTokenRaw.trim();
+    const accessToken = accessTokenRaw.trim();
 
     if (!accessToken) {
       return res.status(500).json({
@@ -20,13 +20,12 @@ const accessToken = accessTokenRaw.trim();
     }
 
     // 3) Lê e valida o body
-    const { title, price, quantity, userId } = (req.body ?? {}) as {
-  title?: string;
-  price?: number;
-  quantity?: number;
-  userId?: string;
-};
-
+    const { title, price, quantity, email } = (req.body ?? {}) as {
+      title?: string;
+      price?: number;
+      quantity?: number;
+      email?: string;
+    };
 
     if (!title || typeof title !== "string") {
       return res.status(400).json({ ok: false, error: "title inválido" });
@@ -36,13 +35,22 @@ const accessToken = accessTokenRaw.trim();
       return res.status(400).json({ ok: false, error: "price inválido" });
     }
 
+    if (!email || typeof email !== "string") {
+      return res.status(400).json({ ok: false, error: "email inválido" });
+    }
+
+    const payerEmail = email.trim().toLowerCase();
+    if (!payerEmail.includes("@")) {
+      return res.status(400).json({ ok: false, error: "email inválido" });
+    }
+
     const qty = typeof quantity === "number" && quantity > 0 ? quantity : 1;
 
     // 4) Configura SDK Mercado Pago
     const client = new MercadoPagoConfig({ accessToken });
     const preference = new Preference(client);
 
-    // 5) Itens do checkout (fora do body, do jeito certo)
+    // 5) Itens do checkout
     const items: any[] = [
       {
         title: title,
@@ -56,6 +64,10 @@ const accessToken = accessTokenRaw.trim();
     const prefResp = await preference.create({
       body: {
         items: items,
+        payer: {
+          email: payerEmail,
+        },
+        external_reference: payerEmail,
         back_urls: {
           success: "https://zeloo-gamma.vercel.app/",
           pending: "https://zeloo-gamma.vercel.app/",

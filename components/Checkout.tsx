@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../services/supabaseClient";
 import { PlanDetails, AdminProfile } from "../types";
 
 interface CheckoutProps {
@@ -8,11 +8,6 @@ interface CheckoutProps {
   onCancel: () => void;
   onSuccess: (data: any) => void;
 }
-
-// Supabase client (frontend) - usa ANON key (ok no client)
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSuccess }) => {
   const [step, setStep] = useState<"DETAILS" | "PAYMENT">("DETAILS");
@@ -43,43 +38,49 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
 
   const handleProcess = async () => {
     setLoading(true);
+
     try {
-      // 1) pegar o usuário logado no Supabase
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      if (userErr) throw new Error(userErr.message);
+      // 1) Pegar a sessão atual (getSession)
+      const email = formData.email?.trim().toLowerCase();
 
-      const user = userData?.user;
-      if (!user?.id) {
-        alert("Você precisa estar logado para assinar.");
-        setLoading(false);
-        return;
-      }
+if (!email) {
+  alert("Informe seu e-mail para continuar.");
+  return;
+}
 
-      // 2) chamar seu backend /api/checkout (Mercado Pago)
+
+      // 3) Chamar seu backend /api/checkout (Mercado Pago)
       const resp = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: `Zeloo Premium - ${plan.name}`,
-          price: Number(contractValue), // valor (conforme seu backend já usa)
+          price: Number(contractValue),
           quantity: 1,
-          userId: user.id, // IMPORTANTÍSSIMO: isso vira external_reference
+          email: formData.email,
+ // vira external_reference no backend
         }),
       });
 
-      const json = await resp.json();
-
-      if (!resp.ok || !json?.ok || !json?.init_point) {
-        console.error("Checkout error:", json);
-        alert(json?.error || "Falha ao iniciar pagamento no Mercado Pago.");
-        setLoading(false);
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        console.error("Erro no /api/checkout:", errorText);
+        alert("Falha ao iniciar pagamento no Mercado Pago. Tente novamente.");
         return;
       }
 
-      // 3) redirecionar para o Mercado Pago
+      const json = await resp.json();
+
+      if (!json?.ok || !json?.init_point) {
+        console.error("Checkout error:", json);
+        alert(json?.error || "Falha ao iniciar pagamento no Mercado Pago.");
+        return;
+      }
+
+      // 4) Redirecionar para o Mercado Pago
       window.location.href = json.init_point;
     } catch (err: any) {
-      console.error(err);
+      console.error("Erro inesperado no checkout:", err);
       alert(err?.message || "Falha ao iniciar pagamento.");
     } finally {
       setLoading(false);
@@ -164,7 +165,9 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
                 disabled={loading}
                 className="w-full py-6 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-2xl flex items-center justify-center gap-3"
               >
-                {loading ? "Abrindo Mercado Pago..." : `Pagar R$ ${contractValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
+                {loading
+                  ? "Abrindo Mercado Pago..."
+                  : `Pagar R$ ${contractValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
               </button>
             </div>
           )}
