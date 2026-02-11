@@ -10,15 +10,14 @@ interface DashboardProps {
   onAddRequest: (desc: string, urgent: boolean) => void;
   onGoHome?: () => void;
   onApproveVisitCost: (requestId: string) => void;
-
-  // ⚠️ Mantemos, mas AGORA não vamos chamar antes do pagamento.
-  onBuyExtraVisits: (userId: string, quantity: number) => void;
+  onBuyExtraVisits: (userId: string, quantity: number) => void; // (mantido por compatibilidade, mas não usamos mais aqui)
 }
 
 type TabId = 'HOME' | 'HISTORY' | 'CHAT' | 'ACCOUNT';
 type HistoryView = 'ACTIVE' | 'ARCHIVED';
 
 const parsePtBrDate = (s: string): Date | null => {
+  // Espera "dd/mm/aaaa"
   const parts = s?.split('/');
   if (!parts || parts.length !== 3) return null;
 
@@ -32,7 +31,7 @@ const parsePtBrDate = (s: string): Date | null => {
   return new Date(yyyy, mm - 1, dd);
 };
 
-const ADMIN_WHATSAPP = '5543996000274';
+const ADMIN_WHATSAPP = '5543996000274'; // ✅ troque se quiser outro número
 
 const Dashboard: React.FC<DashboardProps> = ({
   onLogout,
@@ -43,8 +42,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   onAddRequest,
   onGoHome,
   onApproveVisitCost,
-  onBuyExtraVisits,
 }) => {
+  // ✅ Segurança: se ainda não carregou usuário, não quebra tela
   if (!userData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
@@ -63,26 +62,32 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [newReq, setNewReq] = useState({ desc: '', urgent: false });
 
   const [chatInput, setChatInput] = useState('');
+
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // ===== Atendimento Extra (Modal) =====
   const [showExtraModal, setShowExtraModal] = useState(false);
   const [extraQty, setExtraQty] = useState<number>(1);
-  const [extraLoading, setExtraLoading] = useState(false);
+
+  // ✅ loading do checkout de extras
+  const [extraPayLoading, setExtraPayLoading] = useState(false);
 
   // 🔴 Badge: contador de mensagens novas do ADMIN quando não está no chat
   const [unreadAdminCount, setUnreadAdminCount] = useState(0);
   const lastSeenAdminCountRef = useRef<number | null>(null);
 
+  // ✅ Auto-scroll ao fim quando está no chat
   useEffect(() => {
     if (activeTab === 'CHAT') {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [chatMessages, activeTab]);
 
+  // ✅ Calcula badge de mensagens novas do ADMIN
   useEffect(() => {
     const adminCount = chatMessages.filter((m) => m.sender === 'ADMIN').length;
 
+    // primeira execução: inicializa sem notificar
     if (lastSeenAdminCountRef.current === null) {
       lastSeenAdminCountRef.current = adminCount;
       return;
@@ -90,6 +95,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     const last = lastSeenAdminCountRef.current;
 
+    // se aumentou e NÃO está no chat -> soma não lidas
     if (adminCount > last && activeTab !== 'CHAT') {
       setUnreadAdminCount((prev) => prev + (adminCount - last));
     }
@@ -118,19 +124,23 @@ const Dashboard: React.FC<DashboardProps> = ({
   const quota = useMemo(() => {
     const plan = userData?.planName || '';
 
+    // padrão residencial: 2 atendimentos (3h cada) = 6h/mês
     let totalHours = 6;
     let totalAppointments = 2;
 
+    // comercial: 4 atendimentos (3h cada) = 12h/mês
     if (plan.includes('Comercial')) {
       totalHours = 12;
       totalAppointments = 4;
     }
 
+    // condomínio: sob contrato (por enquanto 0 aqui)
     if (plan.includes('Condomínio')) {
       totalHours = 0;
       totalAppointments = 0;
     }
 
+    // Só CONCLUÍDOS do mês atual contam
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
 
@@ -169,8 +179,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   // ===== Preço de atendimento extra (por atendimento de até 3h) =====
   const extraPricing = useMemo(() => {
     const plan = userData?.planName || '';
+
+    // valores sugeridos (1 atendimento extra = até 3h)
     if (plan.includes('Comercial')) return { label: 'Atendimento extra (até 3h)', price: 220 };
     if (plan.includes('Condomínio')) return { label: 'Atendimento extra (até 3h)', price: 300 };
+
+    // Residencial (padrão)
     return { label: 'Atendimento extra (até 3h)', price: 150 };
   }, [userData]);
 
@@ -181,6 +195,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const brl = (value: number) =>
     value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  // ===== Tabela de preços por plano (para exibir no modal) =====
   const extraPriceTable = useMemo(() => {
     return {
       residential: 150,
@@ -189,85 +204,52 @@ const Dashboard: React.FC<DashboardProps> = ({
     };
   }, []);
 
-  // ===== Pedido de atendimento extra =====
-  type ExtraOrder = {
-    id: string;
-    createdAt: string;
-    userId: string;
-    userName: string;
-    planName: string;
-    qty: number;
-    unitPrice: number;
-    total: number;
-    status: 'PENDING_PAYMENT' | 'PAID' | 'CANCELLED';
-  };
-
-  const createExtraOrder = () => {
-    const order: ExtraOrder = {
-      id: `extra_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-      createdAt: new Date().toISOString(),
-      userId: userData.id,
-      userName: userData.name,
-      planName: userData.planName,
-      qty: extraQty,
-      unitPrice: extraPricing.price || 0,
-      total: extraTotal,
-      status: 'PENDING_PAYMENT',
-    };
-
-    const key = 'zeloo_extra_orders';
-    const existing = localStorage.getItem(key);
-    const list: ExtraOrder[] = existing ? JSON.parse(existing) : [];
-    list.unshift(order);
-    localStorage.setItem(key, JSON.stringify(list));
-
-    return order;
-  };
-
-  // ✅ NOVO: chama o checkout Mercado Pago para extras
-  const goToExtraPayment = async () => {
+  // ✅ NOVO: Checkout real de extras (Mercado Pago)
+  const handleExtraCheckout = async () => {
     try {
-      setExtraLoading(true);
+      setExtraPayLoading(true);
 
-      const payerEmail = String(userData.email || '').trim().toLowerCase();
-      if (!payerEmail || !payerEmail.includes('@')) {
-        alert('Seu usuário está sem e-mail válido. Verifique seu cadastro.');
+      const email = (userData?.email || '').trim().toLowerCase();
+      if (!email || !email.includes('@')) {
+        alert('Seu e-mail não está válido. Faça login novamente ou ajuste seu cadastro.');
         return;
       }
 
-      // 1) cria pedido local para o admin ver (como você já fazia)
-      const order = createExtraOrder();
-
-      // 2) chama o checkout do Mercado Pago
       const resp = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: `${extraPricing.label} - ${order.qty}x`,
-          price: Number(extraPricing.price || 0),
-          quantity: Number(order.qty || 1),
-          email: payerEmail,
+          title: `Zeloo - Atendimentos Extras (${extraQty}x)`,
+          price: Number(extraTotal), // total em R$
+          quantity: 1, // uma cobrança no valor total
+          email,
+          kind: 'EXTRA_VISITS', // ✅ identifica no webhook
+          extraQty: extraQty, // ✅ quantidade de extras para creditar
         }),
       });
 
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok || !json?.ok) {
-        console.error('EXTRA CHECKOUT ERROR:', json);
-        alert(`Não foi possível abrir o pagamento agora.\n\nDetalhe: ${json?.error || 'Erro desconhecido'}`);
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        console.error('Erro no /api/checkout (extras):', errorText);
+        alert('Falha ao iniciar pagamento de extras. Tente novamente.');
         return;
       }
 
-      const url = json?.init_point || json?.sandbox_init_point;
-      if (!url) {
-        alert('Checkout criado, mas não retornou link de pagamento.');
+      const json = await resp.json();
+
+      if (!json?.ok || !json?.init_point) {
+        console.error('Checkout extras error:', json);
+        alert(json?.error || 'Falha ao iniciar pagamento de extras.');
         return;
       }
 
-      // 3) Redireciona pro MP (mesmo comportamento do plano)
-      window.location.href = url;
-    } finally {
-      setExtraLoading(false);
       setShowExtraModal(false);
+      window.location.href = json.init_point;
+    } catch (err: any) {
+      console.error('Erro inesperado (extras):', err);
+      alert(err?.message || 'Falha ao iniciar pagamento de extras.');
+    } finally {
+      setExtraPayLoading(false);
     }
   };
 
@@ -294,6 +276,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const handleTabClick = (tab: TabId) => {
     setActiveTab(tab);
 
+    // ✅ Se entrou no Chat: zera badge e marca como visto
     if (tab === 'CHAT') {
       setUnreadAdminCount(0);
       const adminCount = chatMessages.filter((m) => m.sender === 'ADMIN').length;
@@ -414,7 +397,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
 
                 <div className="mt-8 h-3 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-600 rounded-full transition-all" style={{ width: `${usagePerc}%` }} />
+                  <div
+                    className="h-full bg-indigo-600 rounded-full transition-all"
+                    style={{ width: `${usagePerc}%` }}
+                  />
                 </div>
 
                 <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -692,6 +678,34 @@ const Dashboard: React.FC<DashboardProps> = ({
                   </p>
                 </div>
               </div>
+
+              <div className="mt-12 p-6 rounded-3xl bg-slate-50 border border-slate-100">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Uso do mês</p>
+                <div className="mt-3 flex items-center justify-between flex-wrap gap-4">
+                  <div className="font-black text-slate-900">
+                    {quota.usedHours.toFixed(1)}h usadas de {quota.totalHours}h
+                  </div>
+                  <div className="text-sm font-bold text-slate-600">
+                    {quota.remainingAppointments} atendimentos restantes
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-12 flex gap-3 flex-wrap">
+                <button
+                  onClick={() => alert('Cancelamento entra na próxima versão (com gateway + contratos).')}
+                  className="px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+                >
+                  Solicitar cancelamento
+                </button>
+
+                <button
+                  onClick={() => alert('Na próxima etapa vamos conectar Mercado Pago/Stripe para Pix, cartão e boleto.')}
+                  className="px-8 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
+                >
+                  Ver formas de pagamento
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -702,7 +716,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         <div className="fixed inset-0 z-[999] flex items-center justify-center p-6">
           <div
             className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in"
-            onClick={() => !extraLoading && setShowExtraModal(false)}
+            onClick={() => (extraPayLoading ? null : setShowExtraModal(false))}
           />
 
           <div className="relative bg-white rounded-[3.5rem] p-12 max-w-2xl w-full shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
@@ -713,13 +727,15 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </h3>
                 <p className="text-sm text-slate-600 font-semibold mt-3 leading-relaxed">
                   Atendimento extra é um pacote adicional de suporte com duração de até <span className="font-black">3 horas</span>.
+                  Ideal quando você já utilizou os atendimentos do seu plano e precisa de mais um suporte rápido.
                 </p>
               </div>
 
               <button
-                onClick={() => !extraLoading && setShowExtraModal(false)}
+                onClick={() => (extraPayLoading ? null : setShowExtraModal(false))}
                 className="text-slate-300 hover:text-slate-950 font-black text-3xl"
                 aria-label="Fechar"
+                disabled={extraPayLoading}
               >
                 ×
               </button>
@@ -760,7 +776,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <button
                     onClick={() => setExtraQty((q) => Math.max(1, q - 1))}
                     className="w-12 h-12 rounded-2xl bg-slate-950 text-white font-black text-xl hover:bg-indigo-600 transition-all disabled:opacity-40"
-                    disabled={extraQty <= 1 || extraLoading}
+                    disabled={extraQty <= 1 || extraPayLoading}
                   >
                     −
                   </button>
@@ -768,8 +784,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <select
                     value={extraQty}
                     onChange={(e) => setExtraQty(Number(e.target.value))}
-                    disabled={extraLoading}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:border-indigo-600 transition-all"
+                    disabled={extraPayLoading}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:border-indigo-600 transition-all disabled:opacity-60"
                   >
                     {Array.from({ length: 10 }).map((_, i) => {
                       const v = i + 1;
@@ -783,12 +799,16 @@ const Dashboard: React.FC<DashboardProps> = ({
 
                   <button
                     onClick={() => setExtraQty((q) => Math.min(10, q + 1))}
-                    disabled={extraLoading}
-                    className="w-12 h-12 rounded-2xl bg-slate-950 text-white font-black text-xl hover:bg-indigo-600 transition-all"
+                    className="w-12 h-12 rounded-2xl bg-slate-950 text-white font-black text-xl hover:bg-indigo-600 transition-all disabled:opacity-40"
+                    disabled={extraPayLoading}
                   >
                     +
                   </button>
                 </div>
+
+                <p className="mt-4 text-xs text-slate-500 font-semibold">
+                  Cada atendimento extra cobre até <span className="font-black">3 horas</span>.
+                </p>
               </div>
 
               <div className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
@@ -796,29 +816,32 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <p className="text-4xl font-black text-emerald-600 tracking-tighter mt-4">
                   {brl(extraTotal)}
                 </p>
+                <p className="mt-3 text-xs text-slate-500 font-semibold">
+                  Total calculado automaticamente pelo seu plano atual.
+                </p>
               </div>
             </div>
 
             <div className="mt-10 flex gap-3 flex-wrap justify-end">
               <button
                 onClick={() => setShowExtraModal(false)}
-                disabled={extraLoading}
-                className="px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-40"
+                disabled={extraPayLoading}
+                className="px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-60"
               >
                 Cancelar
               </button>
 
               <button
-                onClick={goToExtraPayment}
-                disabled={extraLoading}
-                className="px-10 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all active:scale-95 disabled:opacity-40"
+                onClick={handleExtraCheckout}
+                disabled={extraPayLoading}
+                className="px-10 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all active:scale-95 disabled:opacity-60"
               >
-                {extraLoading ? 'Abrindo pagamento...' : 'Continuar para pagamento'}
+                {extraPayLoading ? 'Abrindo Mercado Pago...' : 'Continuar para pagamento'}
               </button>
             </div>
 
             <p className="mt-6 text-center text-[9px] font-black text-slate-400 uppercase tracking-widest">
-              Pagamento abrirá no Mercado Pago.
+              Após aprovado, o crédito de extras é liberado automaticamente.
             </p>
           </div>
         </div>
