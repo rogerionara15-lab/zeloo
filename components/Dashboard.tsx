@@ -192,8 +192,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     return (extraPricing.price || 0) * (extraQty || 1);
   }, [extraPricing, extraQty]);
 
-  const brl = (value: number) =>
-    value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const brl = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   // ===== Tabela de preços por plano (para exibir no modal) =====
   const extraPriceTable = useMemo(() => {
@@ -204,7 +203,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     };
   }, []);
 
-  // ✅ NOVO: Checkout real de extras (Mercado Pago)
+  // ✅ Checkout real de extras (Mercado Pago) -> chama /api/extras
   const handleExtraCheckout = async () => {
     try {
       setExtraPayLoading(true);
@@ -215,22 +214,23 @@ const Dashboard: React.FC<DashboardProps> = ({
         return;
       }
 
-      const resp = await fetch('/api/checkout', {
+      const unitPrice = Number(extraPricing.price || 0);
+      const quantity = Number(extraQty || 1);
+
+      const resp = await fetch('/api/extras', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: `Zeloo - Atendimentos Extras (${extraQty}x)`,
-          price: Number(extraTotal), // total em R$
-          quantity: 1, // uma cobrança no valor total
           email,
-          kind: 'EXTRA_VISITS', // ✅ identifica no webhook
-          extraQty: extraQty, // ✅ quantidade de extras para creditar
+          quantity, // quantos atendimentos extras
+          price: unitPrice, // preço unitário
+          title: `Zeloo - Atendimentos extras (${quantity}x)`,
         }),
       });
 
       if (!resp.ok) {
         const errorText = await resp.text();
-        console.error('Erro no /api/checkout (extras):', errorText);
+        console.error('Erro no /api/extras:', errorText);
         alert('Falha ao iniciar pagamento de extras. Tente novamente.');
         return;
       }
@@ -254,10 +254,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const filteredHistoryRequests = useMemo(() => {
-    const sorted = requests
-      .slice()
-      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-
+    const sorted = requests.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     return sorted.filter((r) => {
       const isArchived = r.archived === true;
       return historyView === 'ARCHIVED' ? isArchived : !isArchived;
@@ -302,9 +299,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div>
             <div className="text-2xl font-black uppercase tracking-tighter">Zeloo</div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-              Área do assinante
-            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Área do assinante</div>
           </div>
         </div>
 
@@ -387,20 +382,13 @@ const Dashboard: React.FC<DashboardProps> = ({
                   </div>
 
                   <div className="text-right">
-                    <p className="text-5xl font-black text-indigo-600 tracking-tighter">
-                      {Math.round(usagePerc)}%
-                    </p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                      consumido
-                    </p>
+                    <p className="text-5xl font-black text-indigo-600 tracking-tighter">{Math.round(usagePerc)}%</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">consumido</p>
                   </div>
                 </div>
 
                 <div className="mt-8 h-3 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-600 rounded-full transition-all"
-                    style={{ width: `${usagePerc}%` }}
-                  />
+                  <div className="h-full bg-indigo-600 rounded-full transition-all" style={{ width: `${usagePerc}%` }} />
                 </div>
 
                 <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -462,9 +450,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             <div className="flex items-end justify-between gap-6 flex-wrap">
               <div>
                 <h2 className="text-2xl font-black text-slate-900 uppercase">Meus Chamados</h2>
-                <p className="text-slate-500 font-semibold text-sm mt-2">
-                  Você pode enviar fotos e agendar via WhatsApp.
-                </p>
+                <p className="text-slate-500 font-semibold text-sm mt-2">Você pode enviar fotos e agendar via WhatsApp.</p>
               </div>
 
               <div className="flex gap-3 flex-wrap items-end">
@@ -513,7 +499,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                   >
                     <div className="flex-1 min-w-[260px]">
                       <div className="flex items-center gap-3 mb-3 flex-wrap">
-                        <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${statusPill(req.status)}`}>
+                        <span
+                          className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${statusPill(req.status)}`}
+                        >
                           {req.status}
                         </span>
 
@@ -523,9 +511,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           </span>
                         )}
 
-                        {req.isUrgent && (
-                          <span className="text-[10px] font-black text-red-500 uppercase">🚨 Urgente</span>
-                        )}
+                        {req.isUrgent && <span className="text-[10px] font-black text-red-500 uppercase">🚨 Urgente</span>}
                       </div>
 
                       <h4 className="font-black text-slate-900 text-lg">{req.description}</h4>
@@ -593,9 +579,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
                 <div>
                   <h3 className="font-black text-slate-900 text-sm uppercase">Zeloo Concierge</h3>
-                  <p className="text-[9px] font-black uppercase text-emerald-500 flex items-center gap-1">
-                    ● Suporte Online
-                  </p>
+                  <p className="text-[9px] font-black uppercase text-emerald-500 flex items-center gap-1">● Suporte Online</p>
                 </div>
               </div>
 
@@ -685,9 +669,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="font-black text-slate-900">
                     {quota.usedHours.toFixed(1)}h usadas de {quota.totalHours}h
                   </div>
-                  <div className="text-sm font-bold text-slate-600">
-                    {quota.remainingAppointments} atendimentos restantes
-                  </div>
+                  <div className="text-sm font-bold text-slate-600">{quota.remainingAppointments} atendimentos restantes</div>
                 </div>
               </div>
 
@@ -722,9 +704,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           <div className="relative bg-white rounded-[3.5rem] p-12 max-w-2xl w-full shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
             <div className="flex justify-between items-start gap-6 mb-8">
               <div>
-                <h3 className="text-3xl font-black text-slate-950 uppercase tracking-tighter">
-                  Atendimento extra
-                </h3>
+                <h3 className="text-3xl font-black text-slate-950 uppercase tracking-tighter">Atendimento extra</h3>
                 <p className="text-sm text-slate-600 font-semibold mt-3 leading-relaxed">
                   Atendimento extra é um pacote adicional de suporte com duração de até <span className="font-black">3 horas</span>.
                   Ideal quando você já utilizou os atendimentos do seu plano e precisa de mais um suporte rápido.
@@ -813,12 +793,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               <div className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total</p>
-                <p className="text-4xl font-black text-emerald-600 tracking-tighter mt-4">
-                  {brl(extraTotal)}
-                </p>
-                <p className="mt-3 text-xs text-slate-500 font-semibold">
-                  Total calculado automaticamente pelo seu plano atual.
-                </p>
+                <p className="text-4xl font-black text-emerald-600 tracking-tighter mt-4">{brl(extraTotal)}</p>
+                <p className="mt-3 text-xs text-slate-500 font-semibold">Total calculado automaticamente pelo seu plano atual.</p>
               </div>
             </div>
 
@@ -850,26 +826,18 @@ const Dashboard: React.FC<DashboardProps> = ({
       {/* MODAL: NOVO CHAMADO */}
       {showModal && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center p-6">
-          <div
-            className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in"
-            onClick={() => setShowModal(false)}
-          />
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in" onClick={() => setShowModal(false)} />
           <div className="relative bg-white rounded-[3.5rem] p-12 max-w-xl w-full shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-10">
               <h3 className="text-3xl font-black text-slate-950 uppercase tracking-tighter">Novo Chamado Técnico</h3>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-slate-300 hover:text-slate-950 font-black text-3xl"
-              >
+              <button onClick={() => setShowModal(false)} className="text-slate-300 hover:text-slate-950 font-black text-3xl">
                 ×
               </button>
             </div>
 
             <div className="space-y-8">
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">
-                  O que precisa ser reparado?
-                </label>
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">O que precisa ser reparado?</label>
                 <textarea
                   value={newReq.desc}
                   onChange={(e) => setNewReq({ ...newReq, desc: e.target.value })}
@@ -906,9 +874,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </button>
               </div>
 
-              <p className="text-center text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                Nossa engenharia responderá via chat.
-              </p>
+              <p className="text-center text-[9px] font-black text-slate-400 uppercase tracking-widest">Nossa engenharia responderá via chat.</p>
             </div>
           </div>
         </div>
