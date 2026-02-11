@@ -2,11 +2,9 @@ import React, { useState } from 'react';
 import { UserRole, UserRegistration } from '../types';
 import { supabase } from '../services/supabaseClient';
 
-
-
 interface LoginModalProps {
   initialMode: 'CLIENT' | 'ADMIN';
-  users: UserRegistration[]; // ainda vamos usar isso pra checar status PAID por enquanto
+  users: UserRegistration[];
   onClose: () => void;
   onSuccess: (role: UserRole, isMaster: boolean, userData?: UserRegistration) => void;
   onGoToPlans?: () => void;
@@ -14,7 +12,7 @@ interface LoginModalProps {
 
 const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGoToPlans }) => {
   const [loading, setLoading] = useState(false);
-  const [login, setLogin] = useState(''); // pode ser "master" ou email
+  const [login, setLogin] = useState(''); // master ou email
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -22,7 +20,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
   const [pin, setPin] = useState(['', '', '', '']);
   const [pinError, setPinError] = useState(false);
 
-  // ADMIN MASTER (mantemos por enquanto)
+  // MASTER (mantemos por enquanto)
   const MASTER_USER = 'master';
   const MASTER_PASS = 'zeloo@admin2024';
   const MASTER_PIN = '0908';
@@ -43,47 +41,53 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
         return;
       }
 
-      // 2) CLIENTE: precisa ser email
+      // 2) CLIENTE precisa ser email
       if (!userLogin.includes('@')) {
         setLoading(false);
         setError('Digite seu e-mail para entrar como cliente.');
         return;
       }
 
-      // 2.1) Login real no Supabase Auth (universal)
+      // ✅ Login real no Supabase Auth
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: userLogin,
         password: userPass,
       });
 
+      // ✅ Agora mostramos o erro real (pra diagnosticar)
       if (signInError) {
         setLoading(false);
-        setError('Acesso negado. Verifique e-mail/senha ou contate o suporte Zeloo.');
+
+        // Ex.: "Invalid login credentials" / "Email not confirmed" / etc.
+        const msg = signInError.message || 'Falha ao autenticar no Supabase.';
+        setError(`Erro Supabase: ${msg}`);
         return;
       }
 
-      // 2.2) Agora que autenticou, validamos o “porteiro” PAID usando a lista local (por enquanto)
-      // Depois vamos migrar isso para o Supabase (tabela profiles/clientes).
+      // Se por algum motivo não veio session/user, também avisamos
+      if (!data?.session || !data?.user) {
+        setLoading(false);
+        setError('Erro Supabase: sessão não criada. Verifique configurações do Auth.');
+        return;
+      }
+
+      // 3) Porteiro local (por enquanto)
       const localUser = users.find(u => u.email.trim().toLowerCase() === userLogin);
 
       if (!localUser) {
-        // Usuário existe no Auth, mas não existe no seu cadastro local ainda.
-        // Isso pode acontecer enquanto não migramos o cadastro pro Supabase.
-        // Vamos deslogar para evitar “sessão solta”.
-        await supabase.auth.signOut();
+        // Auth ok, mas cadastro local não existe nesse dispositivo
+        // (isso explica o problema cross-device do seu modelo atual)
         setLoading(false);
-        setError('Conta encontrada, mas cadastro não foi finalizado. Faça o cadastro completo após o pagamento.');
+        setError(
+          'Login confirmado no Supabase ✅, mas seu cadastro local não existe neste dispositivo.\n' +
+          'Próximo passo: migrar cadastro do cliente para Supabase (profiles) para ficar 100% universal.'
+        );
         return;
       }
 
-      // Se chegou aqui, autenticou e tem cadastro local
       onSuccess(UserRole.CLIENT, false, localUser);
       onClose();
       setLoading(false);
-
-      // DICA: aqui a sessão do Supabase já fica salva e vai funcionar em outro dispositivo
-      // (você vai ver sb-... no Application > Local Storage depois)
-      return;
 
     } catch (err) {
       console.error(err);
@@ -111,15 +115,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
 
     if (enteredPin === MASTER_PIN) {
       setLoading(true);
-
-      // Opcional: garantir que não fica logado como cliente anterior
-      await supabase.auth.signOut();
-
+      await supabase.auth.signOut(); // evita sessão de cliente ativa
       setTimeout(() => {
         onSuccess(UserRole.ADMIN, true);
         onClose();
       }, 500);
-
       return;
     }
 
@@ -213,7 +213,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
                 required
                 autoComplete="username"
                 value={login}
-                onChange={(e) => setLogin(e.target.value)}
+                onChange={e => setLogin(e.target.value)}
                 placeholder="Ex: master ou seu e-mail"
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all"
               />
@@ -228,14 +228,14 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
                 required
                 autoComplete="current-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all"
               />
             </div>
 
             {error && (
-              <div className="p-4 bg-red-50 text-red-600 rounded-xl text-[10px] font-black uppercase text-center border border-red-100 animate-in fade-in slide-in-from-top-2">
+              <div className="p-4 bg-red-50 text-red-600 rounded-xl text-[10px] font-black uppercase text-center border border-red-100 animate-in fade-in slide-in-from-top-2 whitespace-pre-line">
                 ⚠️ {error}
               </div>
             )}
@@ -246,7 +246,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
               className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center disabled:opacity-50"
             >
               {loading ? (
-                <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
               ) : (
                 'Entrar no Sistema'
               )}
