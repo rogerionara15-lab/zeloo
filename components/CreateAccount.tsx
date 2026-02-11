@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { supabase } from '../services/supabaseClient';
 
 interface CreateAccountProps {
   onFinalize: (credentials: { email: string; password: string }) => void;
   onCancel: () => void;
-
-  // opcional: se você quiser passar por prop (não é obrigatório)
   defaultEmail?: string;
 }
 
@@ -26,13 +25,14 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   // ✅ Preenche email automaticamente se veio da URL
   useEffect(() => {
     if (lockedEmail) setEmail(lockedEmail);
   }, [lockedEmail]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -53,7 +53,32 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
       return;
     }
 
-    onFinalize({ email: cleanEmail, password });
+    setLoading(true);
+
+    try {
+      // ✅ Cria conta no Supabase Auth (login universal/cross-device)
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+      });
+
+      if (signUpError) {
+        // Erros comuns: email já existe, senha fraca, etc.
+        setError(signUpError.message || 'Não foi possível criar a conta. Tente novamente.');
+        setLoading(false);
+        return;
+      }
+
+      // Alguns projetos exigem confirmação por email.
+      // Mesmo assim, a conta é criada no Auth.
+      // Vamos seguir seu fluxo atual para finalizar cadastro local.
+      onFinalize({ email: cleanEmail, password });
+      setLoading(false);
+    } catch (err) {
+      console.error(err);
+      setError('Erro inesperado ao criar a conta. Tente novamente.');
+      setLoading(false);
+    }
   };
 
   return (
@@ -95,7 +120,9 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
           </div>
 
           <div>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">Senha</label>
+            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">
+              Senha
+            </label>
             <input
               required
               type="password"
@@ -107,7 +134,9 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
           </div>
 
           <div>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">Confirmar Senha</label>
+            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">
+              Confirmar Senha
+            </label>
             <input
               required
               type="password"
@@ -127,15 +156,17 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
           <div className="pt-4 space-y-3">
             <button
               type="submit"
-              className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3"
+              disabled={loading}
+              className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 disabled:opacity-60"
             >
-              Criar Minha Conta Zeloo
+              {loading ? 'Criando conta...' : 'Criar Minha Conta Zeloo'}
             </button>
 
             <button
               type="button"
               onClick={onCancel}
-              className="w-full py-4 bg-slate-100 text-slate-700 rounded-[2rem] font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
+              disabled={loading}
+              className="w-full py-4 bg-slate-100 text-slate-700 rounded-[2rem] font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all disabled:opacity-60"
             >
               Voltar
             </button>
