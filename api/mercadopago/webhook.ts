@@ -6,8 +6,12 @@ function asString(x: any) {
   return typeof x === "string" ? x : x == null ? "" : String(x);
 }
 
+function asNumber(x: any): number | null {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // MP chama via POST. GET no navegador é só teste.
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
@@ -22,7 +26,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
 
-    // Body pode vir como objeto ou string
     let body: any = req.body;
     if (typeof body === "string") {
       try {
@@ -40,7 +43,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body?.id ||
       (typeof req.query?.["data.id"] === "string" ? (req.query["data.id"] as string) : undefined);
 
-    // Às vezes vem `resource` como URL
     const resource: string | undefined = body?.resource;
     if (!paymentId && resource && typeof resource === "string") {
       const match = resource.match(/\/v1\/payments\/(\d+)/) || resource.match(/\/payments\/(\d+)/);
@@ -58,6 +60,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true });
     }
 
+    const supabaseUrl = (process.env.SUPABASE_URL ?? "").trim();
+    const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
+    if (!supabaseUrl || !serviceRoleKey) {
+      console.log("WEBHOOK: SUPABASE env ausente.");
+      return res.status(200).json({ ok: true });
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+
     // 2) Buscar o pagamento completo no MP
     const mp = new MercadoPagoConfig({ accessToken });
     const paymentApi = new Payment(mp);
@@ -69,38 +80,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const mpStatusDetail = asString(payment?.status_detail);
     const paymentIdFinal = asString(payment?.id || paymentId);
 
-    console.log("WEBHOOK PAYMENT STATUS:", {
-      id: paymentIdFinal,
-      status: mpStatusRaw,
-      status_detail: mpStatusDetail,
-      external_reference: payment?.external_reference,
-      payer_email: payment?.payer?.email,
-    });
-
-    // 3) Pegar email (preferir external_reference que você setou no checkout)
     const externalRef = asString(payment?.external_reference).trim().toLowerCase();
     const payerEmail = asString(payment?.payer?.email).trim().toLowerCase();
     const email = externalRef || payerEmail;
 
+    const metadataKind = asString(payment?.metadata?.kind).toUpperCase(); // PLAN | EXTRA_VISITS
+    const metadataExtraQty = asNumber(payment?.metadata?.extra_qty);
+
+    console.log("WEBHOOK PAYMENT:", {
+      id: paymentIdFinal,
+      status: mpStatusRaw,
+      status_detail: mpStatusDetail,
+      email,
+      metadata_kind: metadataKind,
+      metadata_extra_qty: metadataExtraQty,
+    });
+
     if (!email || !email.includes("@")) {
       console.log("WEBHOOK: email não encontrado (external_reference/payer.email vazios).");
-      // Ainda assim retornamos 200 pra não criar retry infinito
       return res.status(200).json({ ok: true });
     }
 
-    // 4) Supabase client (service role)
-    const supabaseUrl = (process.env.SUPABASE_URL ?? "").trim();
-    const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      console.log("WEBHOOK: SUPABASE env ausente.");
-      return res.status(200).json({ ok: true });
-    }
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
-
-    // 5) Sempre gravar histórico em payments (isso explica pq sua payments estava vazia)
-    // (Se sua tabela payments NÃO tiver colunas raw/status_detail/updated_at, me diga que eu adapto.)
+    // 3) Sempre gravar histórico em payments
     const paymentsUpsert = await supabase
       .from("payments")
       .upsert(
@@ -109,7 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           email,
           status: mpStatusRaw.toUpperCase(),
           status_detail: mpStatusDetail || null,
-          raw: payment, // precisa ser jsonb na tabela
+          raw: payment,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "payment_id" }
@@ -117,13 +118,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (paymentsUpsert.error) {
       console.log("WEBHOOK SUPABASE payments ERROR:", paymentsUpsert.error);
-      // não retorna erro, mas loga para você ver
     } else {
       console.log("WEBHOOK: payments upsert OK:", paymentIdFinal);
     }
 
-    // 6) Se aprovado, liberar acesso (paid_access)
+    // 4) Se aprovado: liberar acesso e (se for extras) creditar
     if (mpStatusRaw === "approved") {
+      // ✅ Proteção anti-duplicação:
+      // Se esse payment_id já existir em paid_access, significa que já processamos esse pagamento.
+      const { data: already, error: alreadyErr } = await supabase
+        .from("paid_access")
+        .select("payment_id")
+        .eq("payment_id", paymentIdFinal)
+        .maybeSingle();
+
+      if (alreadyErr) {
+        console.log("WEBHOOK: erro ao checar duplicidade paid_access:", alreadyErr);
+      }
+
+      const alreadyProcessed = !!already?.payment_id;
+
+      // 4.1) paid_access (sempre)
       const paidAccessUpsert = await supabase
         .from("paid_access")
         .upsert(
@@ -133,7 +148,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             status: "APPROVED",
             paid_at: new Date().toISOString(),
           },
-          // 🔥 MUITO IMPORTANTE: conflito por payment_id (não por email)
           { onConflict: "payment_id" }
         );
 
@@ -142,6 +156,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         console.log("WEBHOOK: paid_access upsert OK:", { email, payment_id: paymentIdFinal });
       }
+
+      // 4.2) Se for compra de extras, creditar em profiles.extra_visits
+      // Só credita se NÃO foi processado antes.
+      if (!alreadyProcessed && metadataKind === "EXTRA_VISITS") {
+        const qty = metadataExtraQty && metadataExtraQty > 0 ? Math.floor(metadataExtraQty) : null;
+
+        if (!qty) {
+          console.log("WEBHOOK: EXTRA_VISITS sem extra_qty válido. Ignorando crédito.");
+          return res.status(200).json({ ok: true });
+        }
+
+        // Busca saldo atual
+        const { data: profile, error: profErr } = await supabase
+          .from("profiles")
+          .select("email, extra_visits")
+          .eq("email", email)
+          .maybeSingle();
+
+        if (profErr) {
+          console.log("WEBHOOK: erro ao buscar profile:", profErr);
+          return res.status(200).json({ ok: true });
+        }
+
+        const current = Number(profile?.extra_visits ?? 0) || 0;
+        const next = current + qty;
+
+        const { error: updErr } = await supabase
+          .from("profiles")
+          .update({ extra_visits: next })
+          .eq("email", email);
+
+        if (updErr) {
+          console.log("WEBHOOK: erro ao creditar extra_visits:", updErr);
+        } else {
+          console.log("WEBHOOK: extra_visits creditado OK:", { email, added: qty, from: current, to: next });
+        }
+      } else if (alreadyProcessed && metadataKind === "EXTRA_VISITS") {
+        console.log("WEBHOOK: pagamento de extras já processado antes. Não creditar novamente.");
+      }
     } else {
       console.log("WEBHOOK: status não aprovado ainda, mantendo só em payments:", mpStatusRaw);
     }
@@ -149,7 +202,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true });
   } catch (e: any) {
     console.log("WEBHOOK ERROR:", e?.message || e);
-    // 200 pra evitar loop agressivo de retries enquanto debugamos
     return res.status(200).json({ ok: true });
   }
 }
