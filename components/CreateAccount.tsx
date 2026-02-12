@@ -23,18 +23,78 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [inviting, setInviting] = useState(false);
+
 
   // ✅ Preenche email automaticamente se veio da URL
   useEffect(() => {
     if (lockedEmail) setEmail(lockedEmail);
   }, [lockedEmail]);
+  const requestInvite = async (emailToInvite: string) => {
+    const resp = await fetch('/api/request-invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: emailToInvite }),
+    });
+
+    let data: any = {};
+    try {
+      data = await resp.json();
+    } catch {
+      // ignore
+    }
+
+    if (resp.ok) {
+      return { ok: true as const, message: '✅ Link enviado! Verifique seu e-mail para criar a senha.' };
+    }
+
+    if (resp.status === 400) {
+      return { ok: false as const, message: 'Informe um e-mail válido para enviar o link.' };
+    }
+    if (resp.status === 403) {
+      return { ok: false as const, message: 'Este e-mail ainda não está aprovado no plano. Verifique o pagamento.' };
+    }
+
+    const details = data?.details || data?.error;
+    return {
+      ok: false as const,
+      message: `Não foi possível enviar o link agora.${details ? ` (${details})` : ''}`,
+    };
+  };
+
+  const handleInviteClick = async () => {
+    setError(null);
+    setInfo(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setError('Informe um e-mail válido.');
+      return;
+    }
+
+    setInviting(true);
+
+    try {
+      const result = await requestInvite(cleanEmail);
+      if (result.ok) setInfo(result.message);
+      else setError(result.message);
+    } catch (err: any) {
+      setError(`Erro ao enviar link. (${err?.message || 'erro desconhecido'})`);
+    }
+
+    setInviting(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+        setError(null);
+    setInfo(null);
+
 
     const cleanEmail = email.trim().toLowerCase();
 
@@ -95,6 +155,27 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
             {lockedEmail ? ' Seu e-mail já foi vinculado ao pagamento.' : ''}
           </p>
         </div>
+        <div className="mb-6 bg-slate-50 border border-slate-100 rounded-2xl p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+            Já pagou mas ainda não tem senha?
+          </p>
+          <p className="text-xs text-slate-500 font-semibold leading-relaxed">
+            Se você está aprovado no plano, clique abaixo para receber um link e criar sua senha (login universal).
+          </p>
+
+          <button
+            type="button"
+            onClick={handleInviteClick}
+            disabled={inviting || loading}
+            className="mt-4 w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 disabled:opacity-60"
+          >
+            {inviting ? 'Enviando link...' : 'Enviar link para criar senha'}
+          </button>
+
+          <p className="mt-3 text-[10px] text-slate-400 font-bold">
+            * O link será enviado para o e-mail informado acima.
+          </p>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
@@ -150,6 +231,11 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
           {error && (
             <div className="bg-red-50 text-red-600 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-red-100">
               ⚠️ {error}
+            </div>
+          )}
+          {info && (
+            <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-emerald-100">
+              {info}
             </div>
           )}
 
