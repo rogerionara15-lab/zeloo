@@ -114,6 +114,34 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
     }
 
     setLoading(true);
+        // ✅ 1) Bloqueia criação de conta se não estiver APPROVED no paid_access
+    try {
+      const checkResp = await fetch('/api/check-approved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+
+      const checkData = await checkResp.json().catch(() => ({}));
+
+      if (!checkResp.ok) {
+        const details = checkData?.details || checkData?.error;
+        setError(`Erro ao validar seu acesso. Tente novamente em alguns instantes.${details ? ` (${details})` : ''}`);
+        setLoading(false);
+        return;
+      }
+
+      if (!checkData?.approved) {
+        setError('Seu e-mail ainda não está aprovado no plano. Finalize o pagamento ou aguarde a confirmação.');
+        setLoading(false);
+        return;
+      }
+    } catch (err: any) {
+      setError(`Falha de conexão ao validar seu acesso. (${err?.message || 'erro desconhecido'})`);
+      setLoading(false);
+      return;
+    }
+
 
     try {
       // ✅ Cria conta no Supabase Auth (login universal/cross-device)
@@ -176,7 +204,6 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
             * O link será enviado para o e-mail informado acima.
           </p>
         </div>
-
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">
@@ -231,11 +258,6 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
           {error && (
             <div className="bg-red-50 text-red-600 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-red-100">
               ⚠️ {error}
-            </div>
-          )}
-          {info && (
-            <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-emerald-100">
-              {info}
             </div>
           )}
 
