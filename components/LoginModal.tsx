@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserRole, UserRegistration } from '../types';
 import { supabase } from '../services/supabaseClient';
+import { accessService } from '../services/accessService';
 
 interface LoginModalProps {
   initialMode: 'CLIENT' | 'ADMIN';
@@ -54,38 +55,56 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
         password: userPass,
       });
 
-      // ✅ Agora mostramos o erro real (pra diagnosticar)
       if (signInError) {
         setLoading(false);
-
-        // Ex.: "Invalid login credentials" / "Email not confirmed" / etc.
-        const msg = signInError.message || 'Falha ao autenticar no Supabase.';
-        setError(`Erro Supabase: ${msg}`);
+        setError(`Erro Supabase: ${signInError.message}`);
         return;
       }
 
-      // Se por algum motivo não veio session/user, também avisamos
       if (!data?.session || !data?.user) {
         setLoading(false);
         setError('Erro Supabase: sessão não criada. Verifique configurações do Auth.');
         return;
       }
 
-      // 3) Porteiro local (por enquanto)
-      const localUser = users.find(u => u.email.trim().toLowerCase() === userLogin);
+      // ✅ AQUI ESTÁ A CORREÇÃO DO "LOGIN UNIVERSAL":
+      // Em vez de depender do localStorage, validamos no Supabase se o email está APPROVED em paid_access.
+      const approved = await accessService.isEmailApproved(userLogin);
 
-      if (!localUser) {
-        // Auth ok, mas cadastro local não existe nesse dispositivo
-        // (isso explica o problema cross-device do seu modelo atual)
+      if (!approved) {
+        // Segurança: se não está aprovado, a gente não deixa sessão ativa
+        await supabase.auth.signOut();
+
         setLoading(false);
         setError(
-          'Login confirmado no Supabase ✅, mas seu cadastro local não existe neste dispositivo.\n' +
-          'Próximo passo: migrar cadastro do cliente para Supabase (profiles) para ficar 100% universal.'
+          'Seu acesso ainda não foi liberado.\n' +
+          'Se você já pagou, aguarde a confirmação automática ou fale com o suporte Zeloo.'
         );
         return;
       }
 
-      onSuccess(UserRole.CLIENT, false, localUser);
+      // ✅ Acesso aprovado: agora precisamos entregar um "userData" pro App abrir o Dashboard.
+      // Vamos tentar pegar dados do cadastro local (se existir) e, se não existir, criar um mínimo.
+      const localUser = users.find(u => u.email.trim().toLowerCase() === userLogin);
+
+      const userData: UserRegistration = (localUser || {
+        id: data.user.id,                 // id real do Supabase Auth
+        email: userLogin,
+        password: '',                     // não guardamos senha
+        name: userLogin.split('@')[0],    // nome provisório
+        planName: 'Central Essencial Residencial', // provisório (a gente melhora depois)
+        date: new Date().toLocaleDateString('pt-BR'),
+        dueDate: 'Ativo',
+        isBlocked: false,
+        extraVisitsPurchased: 0,
+        paymentStatus: 'PAID',
+      }) as any;
+
+      // Garante que o porteiro do App não bloqueie
+      (userData as any).paymentStatus = 'PAID';
+      (userData as any).isBlocked = false;
+
+      onSuccess(UserRole.CLIENT, false, userData);
       onClose();
       setLoading(false);
 
@@ -99,9 +118,9 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
   const handlePinChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
 
-    const newPin = [...pin];
-    newPin[index] = value.slice(-1);
-    setPin(newPin);
+    const newPinArr = [...pin];
+    newPinArr[index] = value.slice(-1);
+    setPin(newPinArr);
     setPinError(false);
 
     if (value && index < 3) {
@@ -125,8 +144,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ users, onClose, onSuccess, onGo
 
     setPinError(true);
     setPin(['', '', '', '']);
-    const firstInput = document.getElementById('pin-0');
-    firstInput?.focus();
+    document.getElementById('pin-0')?.focus();
   };
 
   return (
