@@ -40,11 +40,9 @@ import {
 } from './types';
 
 import { BRANDING_DATA } from './constants';
-
-// ✅ SUPABASE (apenas 1 import, do caminho correto)
 import { supabase } from './services/supabaseClient';
 
-// ✅ helper local (pra não dar erro no arquivar por data)
+// helper local (pra não dar erro no arquivar por data)
 const parsePtBrDate = (s: string): Date | null => {
   const parts = s?.split('/');
   if (!parts || parts.length !== 3) return null;
@@ -58,18 +56,24 @@ const parsePtBrDate = (s: string): Date | null => {
   return new Date(yyyy, mm - 1, dd);
 };
 
-// ✅ PRA TESTAR SEM ESPERAR 7 DIAS:
+// PRA TESTAR SEM ESPERAR 7 DIAS:
 // const ARCHIVE_AFTER_MS = 10_000;
 const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
-const makeId = () => {
-  // @ts-ignore
-  return (crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+// ✅ ID sempre UUID (sem fallback "id-123" que quebra colunas uuid)
+const makeUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+
+  // fallback v4 (raríssimo hoje, mas garante UUID válido)
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 };
 
 // ----------------------
 // MAPPERS (Supabase <-> Types)
-// Ajuste só se suas colunas tiverem nomes diferentes.
 // ----------------------
 const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
   return {
@@ -79,19 +83,15 @@ const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
     description: String(row.description ?? ''),
     isUrgent: Boolean(row.is_urgent ?? row.isUrgent ?? false),
     status: (row.status ?? ServiceStatus.PENDING) as any,
-
-    // seu app usa pt-BR no createdAt (texto)
     createdAt: row.created_at
       ? new Date(row.created_at).toLocaleDateString('pt-BR')
       : (row.createdAt ?? new Date().toLocaleDateString('pt-BR')),
-
     visitCost:
       typeof row.visit_cost === 'number'
         ? row.visit_cost
         : typeof row.visitCost === 'number'
           ? row.visitCost
           : (row.visit_cost != null ? Number(row.visit_cost) : 0),
-
     archived: Boolean(row.archived ?? false),
     adminReply: row.admin_reply ?? row.adminReply,
     completedAt: row.completed_at ?? row.completedAt,
@@ -100,7 +100,6 @@ const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
 };
 
 const mapChatRowToChatMessage = (row: any): ChatMessage => {
-  // ✅ evita depender de coluna "timestamp"
   const iso = row.created_at ?? row.timestamp ?? new Date().toISOString();
   const timeLabel =
     typeof iso === 'string'
@@ -141,7 +140,7 @@ const mapUserRowToUser = (row: any): UserRegistration => {
 };
 
 // ----------------------
-// ✅ Local cache helpers (mantidos SOMENTE para branding/admin)
+// Local cache helpers (mantidos SOMENTE para branding/admin)
 // ----------------------
 const getFromLocal = (key: string, defaultValue: any) => {
   try {
@@ -158,6 +157,13 @@ const saveToLocal = (key: string, data: any) => {
   } catch {}
 };
 
+// ✅ troca URL sem recarregar (não perde estado)
+const replaceUrl = (path: string) => {
+  try {
+    window.history.replaceState({}, '', path);
+  } catch {}
+};
+
 const App: React.FC = () => {
   const [view, setView] = useState<string>('LANDING');
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -167,12 +173,9 @@ const App: React.FC = () => {
   const [isSuperUser, setIsSuperUser] = useState(false);
   const [pendingRegistration, setPendingRegistration] = useState<any>(null);
 
-  // ✅ Pode continuar local (não interfere nos 3 problemas)
   const [branding, setBranding] = useState<BrandingInfo>(() => getFromLocal('branding', BRANDING_DATA));
 
-  // ✅ AQUI ESTÁ A CORREÇÃO PRINCIPAL:
-  // ❌ não carregar users/requests/chat_messages do localStorage
-  // ✅ sempre começa vazio e hidrata do Supabase
+  // ✅ Sempre começa vazio e hidrata do Supabase
   const [registeredUsers, setRegisteredUsers] = useState<UserRegistration[]>([]);
   const [currentUser, setCurrentUser] = useState<UserRegistration | null>(null);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
@@ -246,38 +249,30 @@ const App: React.FC = () => {
   );
 
   // ----------------------
-  // ✅ Hydrate do Supabase (pega tudo do servidor ao abrir)
+  // Hydrate do Supabase
   // ----------------------
   useEffect(() => {
     const hydrate = async () => {
-      try {
-        const [uRes, rRes, cRes] = await Promise.all([
-          supabase.from('users').select('*').order('created_at', { ascending: false }),
-          supabase.from('requests').select('*').order('created_at', { ascending: false }),
-          supabase.from('chat_messages').select('*').order('created_at', { ascending: true }),
-        ]);
+      const [uRes, rRes, cRes] = await Promise.all([
+        supabase.from('users').select('*').order('created_at', { ascending: false }),
+        supabase.from('requests').select('*').order('created_at', { ascending: false }),
+        supabase.from('chat_messages').select('*').order('created_at', { ascending: true }),
+      ]);
 
-        if (uRes.error) console.warn('Supabase users error:', uRes.error);
-        if (rRes.error) console.warn('Supabase requests error:', rRes.error);
-        if (cRes.error) console.warn('Supabase chat_messages error:', cRes.error);
+      if (uRes.error) console.warn('Supabase users error:', uRes.error);
+      if (rRes.error) console.warn('Supabase requests error:', rRes.error);
+      if (cRes.error) console.warn('Supabase chat_messages error:', cRes.error);
 
-        const users = (uRes.data || []).map(mapUserRowToUser);
-        const reqs = (rRes.data || []).map(mapRequestRowToRequest);
-        const chats = (cRes.data || []).map(mapChatRowToChatMessage);
-
-        setRegisteredUsers(users);
-        setMaintenanceRequests(reqs);
-        setChatMessages(chats);
-      } catch (e) {
-        console.warn('Hydrate failed:', e);
-      }
+      setRegisteredUsers((uRes.data || []).map(mapUserRowToUser));
+      setMaintenanceRequests((rRes.data || []).map(mapRequestRowToRequest));
+      setChatMessages((cRes.data || []).map(mapChatRowToChatMessage));
     };
 
     hydrate();
   }, []);
 
   // ----------------------
-  // ✅ Realtime (admin vê OS / chat / users na hora, em QUALQUER DEVICE)
+  // Realtime
   // ----------------------
   useEffect(() => {
     const ch = supabase
@@ -342,15 +337,12 @@ const App: React.FC = () => {
       });
 
     ch.subscribe();
-
     return () => {
       supabase.removeChannel(ch);
     };
   }, []);
 
-  // ----------------------
-  // ✅ Salvar cache local APENAS de branding/admin (não atrapalha realtime)
-  // ----------------------
+  // cache local só branding/admin
   useEffect(() => {
     saveToLocal('branding', branding);
     saveToLocal('admin', adminProfile);
@@ -361,7 +353,7 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // ✅ “Porteiro” do login (usuário só entra se PAID)
+  // porteiro do login
   const handleLogin = (role: UserRole, isMaster: boolean = false, userData?: UserRegistration) => {
     setIsSuperUser(isMaster);
 
@@ -389,10 +381,10 @@ const App: React.FC = () => {
     setShowLoginModal(false);
   };
 
-  // ✅ Envia chat e grava no Supabase (realtime no admin)
+  // chat
   const handleSendChatMessage = async (text: string, sender: 'USER' | 'ADMIN', userId: string, userName: string) => {
     const newMessage: ChatMessage = {
-      id: makeId(),
+      id: makeUuid(),
       userId,
       userName,
       text,
@@ -400,28 +392,22 @@ const App: React.FC = () => {
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     };
 
-    // UI imediata
     setChatMessages((prev) => [...prev, newMessage]);
 
-    // ✅ INSERT seguro: não depende de coluna "timestamp"
-    // Se sua tabela tiver created_at automático, ótimo.
-    try {
-      await supabase.from('chat_messages').insert([
-        {
-          id: newMessage.id,
-          user_id: newMessage.userId,
-          user_name: newMessage.userName,
-          text: newMessage.text,
-          sender: newMessage.sender,
-          // NÃO manda timestamp aqui (pra não quebrar se a coluna não existir)
-        },
-      ]);
-    } catch (e) {
-      console.warn('Falha ao salvar chat no Supabase:', e);
-    }
+    const { error } = await supabase.from('chat_messages').insert([
+      {
+        id: newMessage.id,
+        user_id: newMessage.userId,
+        user_name: newMessage.userName,
+        text: newMessage.text,
+        sender: newMessage.sender,
+      },
+    ]);
+
+    if (error) console.warn('Falha ao salvar chat no Supabase:', error);
   };
 
-  // ✅ Aprova/recusa pagamento e grava no Supabase (users)
+  // aprovar/reprovar pagamento
   const handleHandlePaymentAction = async (userId: string, action: 'APPROVE' | 'REJECT') => {
     const paymentStatus = action === 'APPROVE' ? 'PAID' : 'REJECTED';
     const isBlocked = action === 'REJECT';
@@ -430,14 +416,8 @@ const App: React.FC = () => {
       prev.map((u) => (u.id === userId ? ({ ...u, paymentStatus, isBlocked } as any) : u))
     );
 
-    try {
-      await supabase
-        .from('users')
-        .update({ payment_status: paymentStatus, is_blocked: isBlocked })
-        .eq('id', userId);
-    } catch (e) {
-      console.warn('Falha ao atualizar pagamento no Supabase:', e);
-    }
+    const { error } = await supabase.from('users').update({ payment_status: paymentStatus, is_blocked: isBlocked }).eq('id', userId);
+    if (error) console.warn('Falha ao atualizar pagamento no Supabase:', error);
 
     if (action === 'APPROVE') alert('Pagamento aprovado com sucesso! O acesso do cliente já está liberado.');
 
@@ -446,7 +426,7 @@ const App: React.FC = () => {
     }
   };
 
-  // ✅ AUTO-ARQUIVAMENTO: roda sempre que requests mudarem
+  // auto-arquivamento
   useEffect(() => {
     const now = Date.now();
     let changed = false;
@@ -531,20 +511,19 @@ const App: React.FC = () => {
     alert('Verificação concluída ✅ (arquivamento automático aplicado quando cabível)');
   };
 
-  // ✅ TRAVA FINAL: decide se o usuário pode ver o Dashboard
+  // trava final
   const currentUserLive = currentUser ? (registeredUsers.find((u) => u.id === currentUser.id) || currentUser) : null;
   const canAccessDashboard =
     !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
 
-  // ✅ PORTEIRO DE URL (mata 404 e evita depender de Router)
   const pathname = window.location.pathname;
 
-  // /pos-pagamento?email=... -> renderiza PosPagamento diretamente
+  // /pos-pagamento
   if (pathname === '/pos-pagamento') {
     return (
       <PosPagamento
         onBack={() => {
-          window.location.href = '/';
+          replaceUrl('/');
         }}
         onApproved={(email) => {
           setPendingRegistration((prev: any) => ({
@@ -552,62 +531,54 @@ const App: React.FC = () => {
             email,
             paymentStatus: 'PAID',
           }));
-          window.location.href = `/criar-conta?email=${encodeURIComponent(email)}`;
+          replaceUrl(`/criar-conta?email=${encodeURIComponent(email)}`);
         }}
       />
     );
   }
 
-  // /criar-conta?email=... -> renderiza CreateAccount diretamente
+  // /criar-conta
   if (pathname === '/criar-conta') {
     return (
       <CreateAccount
         onFinalize={async (creds) => {
-          const id = makeId();
-
-          const newUser: UserRegistration = {
-            ...(pendingRegistration || {}),
-            id,
+          // ✅ NÃO cria usuário local antes de salvar no Supabase
+          const payload = {
+            name: (pendingRegistration?.name ?? '') as string,
             email: creds.email,
             password: creds.password,
-            date: new Date().toLocaleDateString('pt-BR'),
-            dueDate: 'Ativo',
-            isBlocked: false,
-            extraVisitsPurchased: 0,
-            paymentStatus: 'PAID',
-          } as any;
+            plan_name: (pendingRegistration?.planName ?? '') as string,
+            payment_status: 'PAID',
+            is_blocked: false,
+            extra_visits_purchased: 0,
+          };
 
-          setRegisteredUsers((prev) => [newUser, ...prev]);
-          setCurrentUser(newUser);
-          setView('DASHBOARD');
+          const { data, error } = await supabase.from('users').insert([payload]).select('*').single();
 
-          try {
-            await supabase.from('users').insert([
-              {
-                id: newUser.id,
-                name: (newUser as any).name ?? (pendingRegistration?.name ?? ''),
-                email: newUser.email,
-                password: newUser.password,
-                plan_name: (newUser as any).planName ?? pendingRegistration?.planName ?? '',
-                payment_status: (newUser as any).paymentStatus ?? 'PAID',
-                is_blocked: Boolean((newUser as any).isBlocked),
-                extra_visits_purchased: Number((newUser as any).extraVisitsPurchased ?? 0),
-              },
-            ]);
-          } catch (e) {
-            console.warn('Falha ao salvar usuário no Supabase:', e);
+          if (error) {
+            console.error('❌ Falha ao salvar usuário no Supabase:', error);
+            alert(`Falha ao criar usuário:\n${error.message}`);
+            return;
           }
 
-          window.location.href = '/';
+          const savedUser = mapUserRowToUser(data);
+
+          // atualiza estado com o usuário REAL (uuid do Supabase)
+          setRegisteredUsers((prev) => [savedUser, ...prev]);
+          setCurrentUser(savedUser);
+          setView('DASHBOARD');
+
+          // volta pra "/" sem reload (mantém estado)
+          replaceUrl('/');
         }}
         onCancel={() => {
-          window.location.href = '/';
+          replaceUrl('/');
         }}
       />
     );
   }
 
-  // ✅ A partir daqui: seu app original por "view"
+  // app principal
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 selection:bg-indigo-600 selection:text-white">
       {view === 'LANDING' && <Header onOpenLogin={() => setShowLoginModal(true)} />}
@@ -629,11 +600,7 @@ const App: React.FC = () => {
               }}
             />
             <AIAssistant onOpenCounselor={() => navigateTo('SMART_COUNSELOR')} />
-            <BudgetGenerator
-              isLoggedIn={!!currentUser}
-              onAuthRequired={() => setShowLoginModal(true)}
-              userPlan={(currentUser as any)?.planName}
-            />
+            <BudgetGenerator isLoggedIn={!!currentUser} onAuthRequired={() => setShowLoginModal(true)} userPlan={(currentUser as any)?.planName} />
             <Pricing
               onSelectPlan={(p) => {
                 setSelectedPlan(p);
@@ -707,53 +674,41 @@ const App: React.FC = () => {
                     chatMessages={chatMessages.filter((m) => (m as any).userId === currentUserLive.id)}
                     onSendChatMessage={handleSendChatMessage}
                     onAddRequest={async (d, u) => {
-  if (!currentUserLive) return;
+                      if (!currentUserLive) return;
 
-  // ✅ 1) NÃO cria id no front
-  // ✅ 2) salva direto no Supabase e pega o registro real de volta
+                      const { data, error } = await supabase
+                        .from('requests')
+                        .insert([
+                          {
+                            user_id: currentUserLive.id,
+                            user_name: (currentUserLive as any).name,
+                            description: d,
+                            is_urgent: Boolean(u),
+                            status: ServiceStatus.PENDING,
+                            visit_cost: 0,
+                            archived: false,
+                          },
+                        ])
+                        .select('*')
+                        .single();
 
-  const { data, error } = await supabase
-    .from('requests')
-    .insert([
-      {
-        // ✅ NÃO mande "id"
-        user_id: currentUserLive.id,
-        user_name: (currentUserLive as any).name,
-        description: d,
-        is_urgent: Boolean(u),
-        status: ServiceStatus.PENDING,
-        visit_cost: 0,
-        archived: false,
-        // created_at o Supabase já preenche sozinho
-      },
-    ])
-    .select('*')
-    .single();
+                      if (error) {
+                        console.error('❌ Falha ao salvar chamado no Supabase:', error);
+                        alert(`Falha ao salvar chamado:\n${error.message}`);
+                        return;
+                      }
 
-  if (error) {
-    console.error('❌ Falha ao salvar chamado no Supabase:', error);
-    alert(`Falha ao salvar chamado:\n${error.message}`);
-    return;
-  }
-
-  // ✅ Agora sim adiciona na tela, já com o id correto vindo do Supabase
-  const mapped = mapRequestRowToRequest(data);
-  setMaintenanceRequests((prev) => [mapped, ...prev]);
-}}
-
+                      const mapped = mapRequestRowToRequest(data);
+                      setMaintenanceRequests((prev) => [mapped, ...prev]);
+                    }}
                     onGoHome={() => setView('LANDING')}
                     onApproveVisitCost={async (rid) => {
                       setMaintenanceRequests((p) =>
-                        p.map((r) =>
-                          (r as any).id === rid ? ({ ...(r as any), status: ServiceStatus.SCHEDULED } as any) : r
-                        )
+                        p.map((r) => ((r as any).id === rid ? ({ ...(r as any), status: ServiceStatus.SCHEDULED } as any) : r))
                       );
 
-                      try {
-                        await supabase.from('requests').update({ status: ServiceStatus.SCHEDULED }).eq('id', rid);
-                      } catch (e) {
-                        console.warn('Falha ao atualizar status (SCHEDULED) no Supabase:', e);
-                      }
+                      const { error } = await supabase.from('requests').update({ status: ServiceStatus.SCHEDULED }).eq('id', rid);
+                      if (error) console.warn('Falha ao atualizar status (SCHEDULED) no Supabase:', error);
                     }}
                     onBuyExtraVisits={(uid, q) =>
                       setRegisteredUsers((p) =>
@@ -816,16 +771,13 @@ const App: React.FC = () => {
                       })
                     );
 
-                    try {
-                      const payload: any = { status };
-                      if (typeof cost === 'number') payload.visit_cost = cost;
-                      if (status === ServiceStatus.COMPLETED) payload.completed_at = new Date().toISOString();
-                      if (status === ServiceStatus.CANCELLED) payload.cancelled_at = new Date().toISOString();
+                    const payload: any = { status };
+                    if (typeof cost === 'number') payload.visit_cost = cost;
+                    if (status === ServiceStatus.COMPLETED) payload.completed_at = new Date().toISOString();
+                    if (status === ServiceStatus.CANCELLED) payload.cancelled_at = new Date().toISOString();
 
-                      await supabase.from('requests').update(payload).eq('id', id);
-                    } catch (e) {
-                      console.warn('Falha ao atualizar request no Supabase:', e);
-                    }
+                    const { error } = await supabase.from('requests').update(payload).eq('id', id);
+                    if (error) console.warn('Falha ao atualizar request no Supabase:', error);
                   }}
                   onLogout={() => {
                     setIsSuperUser(false);
@@ -834,27 +786,18 @@ const App: React.FC = () => {
                   onGoHome={() => setView('LANDING')}
                   onUpdateUserStatus={async (uid, b) => {
                     setRegisteredUsers((p) => p.map((u) => ((u as any).id === uid ? ({ ...(u as any), isBlocked: b } as any) : u)));
-                    try {
-                      await supabase.from('users').update({ is_blocked: b }).eq('id', uid);
-                    } catch (e) {
-                      console.warn('Falha ao atualizar bloqueio no Supabase:', e);
-                    }
+                    const { error } = await supabase.from('users').update({ is_blocked: b }).eq('id', uid);
+                    if (error) console.warn('Falha ao atualizar bloqueio no Supabase:', error);
                   }}
                   onDeleteUser={async (uid) => {
                     setRegisteredUsers((p) => p.filter((u) => (u as any).id !== uid));
-                    try {
-                      await supabase.from('users').delete().eq('id', uid);
-                    } catch (e) {
-                      console.warn('Falha ao deletar usuário no Supabase:', e);
-                    }
+                    const { error } = await supabase.from('users').delete().eq('id', uid);
+                    if (error) console.warn('Falha ao deletar usuário no Supabase:', error);
                   }}
                   onAdminReply={async (rid, rep) => {
                     setMaintenanceRequests((p) => p.map((r) => ((r as any).id === rid ? ({ ...(r as any), adminReply: rep } as any) : r)));
-                    try {
-                      await supabase.from('requests').update({ admin_reply: rep }).eq('id', rid);
-                    } catch (e) {
-                      console.warn('Falha ao salvar resposta admin no Supabase:', e);
-                    }
+                    const { error } = await supabase.from('requests').update({ admin_reply: rep }).eq('id', rid);
+                    if (error) console.warn('Falha ao salvar resposta admin no Supabase:', error);
                   }}
                   onHandlePaymentAction={handleHandlePaymentAction}
                   branding={branding}
@@ -880,21 +823,7 @@ const App: React.FC = () => {
                   paymentStatus={pendingRegistration?.paymentStatus}
                   onContinue={() => navigateTo('CREATE_ACCOUNT')}
                   onConfirmPayment={() => {
-                    window.location.href = '/pos-pagamento';
-                  }}
-                />
-              )}
-
-              {view === 'POS_PAGAMENTO' && (
-                <PosPagamento
-                  onBack={() => navigateTo('LANDING')}
-                  onApproved={(email) => {
-                    setPendingRegistration((prev: any) => ({
-                      ...(prev || {}),
-                      email,
-                      paymentStatus: 'PAID',
-                    }));
-                    navigateTo('CREATE_ACCOUNT');
+                    replaceUrl('/pos-pagamento');
                   }}
                 />
               )}
@@ -902,41 +831,30 @@ const App: React.FC = () => {
               {view === 'CREATE_ACCOUNT' && (
                 <CreateAccount
                   onFinalize={async (creds) => {
-                    const id = makeId();
-
-                    const newUser: UserRegistration = {
-                      ...(pendingRegistration || {}),
-                      id,
+                    // ✅ NÃO cria usuário local antes de salvar no Supabase
+                    const payload = {
+                      name: (pendingRegistration?.name ?? '') as string,
                       email: creds.email,
                       password: creds.password,
-                      date: new Date().toLocaleDateString('pt-BR'),
-                      dueDate: 'Ativo',
-                      isBlocked: false,
-                      extraVisitsPurchased: 0,
-                      paymentStatus: (pendingRegistration?.paymentStatus ?? 'PENDING') as any,
-                    } as any;
+                      plan_name: (pendingRegistration?.planName ?? '') as string,
+                      payment_status: (pendingRegistration?.paymentStatus ?? 'PENDING') as any,
+                      is_blocked: false,
+                      extra_visits_purchased: 0,
+                    };
 
-                    setRegisteredUsers((prev) => [newUser, ...prev]);
+                    const { data, error } = await supabase.from('users').insert([payload]).select('*').single();
 
-                    try {
-                      await supabase.from('users').insert([
-                        {
-                          id: newUser.id,
-                          name: (newUser as any).name ?? pendingRegistration?.name ?? '',
-                          email: newUser.email,
-                          password: newUser.password,
-                          plan_name: (newUser as any).planName ?? pendingRegistration?.planName ?? '',
-                          payment_status: (newUser as any).paymentStatus ?? 'PENDING',
-                          is_blocked: Boolean((newUser as any).isBlocked),
-                          extra_visits_purchased: Number((newUser as any).extraVisitsPurchased ?? 0),
-                        },
-                      ]);
-                    } catch (e) {
-                      console.warn('Falha ao salvar usuário no Supabase:', e);
+                    if (error) {
+                      console.error('❌ Falha ao salvar usuário no Supabase:', error);
+                      alert(`Falha ao criar usuário:\n${error.message}`);
+                      return;
                     }
 
-                    if ((newUser as any).paymentStatus === 'PAID') {
-                      setCurrentUser(newUser);
+                    const savedUser = mapUserRowToUser(data);
+                    setRegisteredUsers((prev) => [savedUser, ...prev]);
+
+                    if ((savedUser as any).paymentStatus === 'PAID') {
+                      setCurrentUser(savedUser);
                       navigateTo('DASHBOARD');
                       return;
                     }
