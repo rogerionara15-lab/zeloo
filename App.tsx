@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from './components/Header';
 import Hero from './components/Hero';
 import Services from './components/Services';
@@ -36,12 +36,17 @@ import {
   ServiceStatus,
   BrandingInfo,
   Service,
-  ChatMessage
+  ChatMessage,
 } from './types';
+
 import { BRANDING_DATA } from './constants';
+
+// ✅ SUPABASE (apenas 1 import, do caminho correto)
+import { supabase } from './services/supabaseClient';
 
 // ✅ helper local (pra não dar erro no arquivar por data)
 const parsePtBrDate = (s: string): Date | null => {
+  // Espera "dd/mm/aaaa"
   const parts = s?.split('/');
   if (!parts || parts.length !== 3) return null;
 
@@ -56,8 +61,99 @@ const parsePtBrDate = (s: string): Date | null => {
 };
 
 // ✅ PRA TESTAR SEM ESPERAR 7 DIAS:
-// const ARCHIVE_AFTER_MS = 10_000; // 10 segundos
+// Troque temporariamente para 10_000 (10 segundos). Depois volte pra 7 dias.
 const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+// const ARCHIVE_AFTER_MS = 10_000;
+
+const makeId = () => {
+  // uuid padrão (melhor pro Supabase)
+  // fallback só pra garantir
+  // @ts-ignore
+  return (crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+};
+
+// ----------------------
+// MAPPERS (Supabase <-> Types)
+// Ajuste só se suas colunas tiverem nomes diferentes.
+// ----------------------
+const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
+  return {
+    id: String(row.id ?? ''),
+    userId: String(row.user_id ?? row.userId ?? ''),
+    userName: String(row.user_name ?? row.userName ?? 'Cliente'),
+    description: String(row.description ?? ''),
+    isUrgent: Boolean(row.is_urgent ?? row.isUrgent ?? false),
+    status: (row.status ?? ServiceStatus.PENDING) as any,
+    createdAt: String(row.created_at_label ?? row.createdAt ?? row.created_at ?? new Date().toLocaleDateString('pt-BR')),
+    visitCost:
+      typeof row.visit_cost === 'number'
+        ? row.visit_cost
+        : typeof row.visitCost === 'number'
+          ? row.visitCost
+          : (row.visit_cost != null ? Number(row.visit_cost) : 0),
+    archived: Boolean(row.archived ?? false),
+    adminReply: row.admin_reply ?? row.adminReply,
+    completedAt: row.completed_at ?? row.completedAt,
+    cancelledAt: row.cancelled_at ?? row.cancelledAt,
+  } as any;
+};
+
+const mapChatRowToChatMessage = (row: any): ChatMessage => {
+  const ts = row.timestamp || row.created_at || new Date().toISOString();
+  return {
+    id: String(row.id ?? ''),
+    userId: String(row.user_id ?? row.userId ?? ''),
+    userName: String(row.user_name ?? row.userName ?? 'Usuário'),
+    text: String(row.text ?? ''),
+    sender: (row.sender ?? 'USER') as any,
+    timestamp:
+      typeof ts === 'string' && ts.includes(':')
+        ? ts
+        : new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+  } as any;
+};
+
+const mapUserRowToUser = (row: any): UserRegistration => {
+  return {
+    id: String(row.id ?? ''),
+    name: row.name ?? row.user_name ?? 'Cliente',
+    email: row.email ?? '',
+    password: row.password ?? '',
+    planName: row.plan_name ?? row.planName ?? '',
+    paymentStatus: row.payment_status ?? row.paymentStatus ?? 'PENDING',
+    isBlocked: Boolean(row.is_blocked ?? row.isBlocked ?? false),
+    date: row.created_at ? new Date(row.created_at).toLocaleDateString('pt-BR') : (row.date ?? new Date().toLocaleDateString('pt-BR')),
+    dueDate: row.due_date ?? row.dueDate ?? 'Ativo',
+    extraVisitsPurchased: row.extra_visits_purchased ?? row.extraVisitsPurchased ?? 0,
+
+    // ✅ se você tiver campos de endereço na tabela users, eles já caem aqui:
+    address: row.address,
+    number: row.number,
+    neighborhood: row.neighborhood,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+    complement: row.complement,
+  } as any;
+};
+
+// ----------------------
+// Local cache helpers (opcional, mas ajuda se ficar sem net)
+// ----------------------
+const getFromLocal = (key: string, defaultValue: any) => {
+  try {
+    const saved = localStorage.getItem(`zeloo_${key}`);
+    return saved ? JSON.parse(saved) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+const saveToLocal = (key: string, data: any) => {
+  try {
+    localStorage.setItem(`zeloo_${key}`, JSON.stringify(data));
+  } catch {}
+};
 
 const App: React.FC = () => {
   const [view, setView] = useState<string>('LANDING');
@@ -68,32 +164,14 @@ const App: React.FC = () => {
   const [isSuperUser, setIsSuperUser] = useState(false);
   const [pendingRegistration, setPendingRegistration] = useState<any>(null);
 
-  const getFromLocal = useCallback((key: string, defaultValue: any) => {
-    try {
-      const saved = localStorage.getItem(`zeloo_${key}`);
-      return saved ? JSON.parse(saved) : defaultValue;
-    } catch (e) {
-      return defaultValue;
-    }
-  }, []);
-
-  const saveToLocal = useCallback((key: string, data: any) => {
-    try {
-      localStorage.setItem(`zeloo_${key}`, JSON.stringify(data));
-    } catch (e) {}
-  }, []);
-
-  const removeFromLocal = useCallback((key: string) => {
-    try {
-      localStorage.removeItem(`zeloo_${key}`);
-    } catch (e) {}
-  }, []);
-
   const [branding, setBranding] = useState<BrandingInfo>(() => getFromLocal('branding', BRANDING_DATA));
   const [registeredUsers, setRegisteredUsers] = useState<UserRegistration[]>(() => getFromLocal('users', []));
-  const [currentUser, setCurrentUser] = useState<UserRegistration | null>(() => getFromLocal('current_user', null));
+  const [currentUser, setCurrentUser] = useState<UserRegistration | null>(null);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() => getFromLocal('requests', []));
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => getFromLocal('chat_messages', []));
+
+  // evita “loop” quando a gente hidrata do supabase
+  const didHydrateRef = useRef(false);
 
   const [availablePlans] = useState<PlanDetails[]>([
     {
@@ -101,11 +179,7 @@ const App: React.FC = () => {
       tier: 'Mensal',
       price: 'R$ 1',
       period: '/mês',
-      features: [
-        'Teste do pagamento',
-        'Verificação do webhook',
-        'Liberação automática (teste)',
-      ],
+      features: ['Teste do pagamento', 'Verificação do webhook', 'Liberação automática (teste)'],
       highlight: false,
       save: 'Plano temporário para teste',
     },
@@ -120,10 +194,10 @@ const App: React.FC = () => {
         'Hora técnica inclui deslocamento + diagnóstico + execução',
         'Atendimento prioritário',
         'Materiais à parte',
-        'Atendimentos extras com valor reduzido'
+        'Atendimentos extras com valor reduzido',
       ],
       highlight: true,
-      save: 'Plano sustentável e sem surpresas'
+      save: 'Plano sustentável e sem surpresas',
     },
     {
       name: 'Central Essencial Comercial',
@@ -136,50 +210,154 @@ const App: React.FC = () => {
         'SLA: atendimento em até 48h (padrão)',
         'Hora técnica inclui deslocamento + diagnóstico + execução',
         'Materiais à parte',
-        'Atendimentos extras com valor reduzido'
+        'Atendimentos extras com valor reduzido',
       ],
-      highlight: false
+      highlight: false,
     },
     {
       name: 'Central Essencial Condomínio',
       tier: 'Sob consulta',
       price: 'A partir de R$ 1500',
       period: '/mês',
-      features: [
-        'Pacote mensal de horas (contrato)',
-        'SLA e cobertura personalizada',
-        'Equipe qualificada para manutenção predial',
-        'Relatórios e histórico de atendimentos'
-      ],
+      features: ['Pacote mensal de horas (contrato)', 'SLA e cobertura personalizada', 'Equipe qualificada para manutenção predial', 'Relatórios e histórico de atendimentos'],
       highlight: false,
-      save: 'Contrato personalizado'
-    }
+      save: 'Contrato personalizado',
+    },
   ]);
 
-  const [adminProfile, setAdminProfile] = useState<AdminProfile>(() => getFromLocal('admin', {
-    name: 'Operação Central Zeloo',
-    document: '00.000.000/0001-00',
-    email: 'admin@zeloo.com',
-    phone: '5543996000274',
-    mercadoPagoLink: '',
-    gatewayStatus: 'DISCONNECTED',
-    environment: 'SANDBOX',
-    publicKey: '',
-    mercadoPagoAccessToken: '',
-    pixKey: 'financeiro@zeloo.com'
-  }));
+  const [adminProfile, setAdminProfile] = useState<AdminProfile>(() =>
+    getFromLocal('admin', {
+      name: 'Operação Central Zeloo',
+      document: '00.000.000/0001-00',
+      email: 'admin@zeloo.com',
+      phone: '5543996000274',
+      mercadoPagoLink: '',
+      gatewayStatus: 'DISCONNECTED',
+      environment: 'SANDBOX',
+      publicKey: '',
+      mercadoPagoAccessToken: '',
+      pixKey: 'financeiro@zeloo.com',
+    })
+  );
 
-  // ✅ Persistência local
+  // ----------------------
+  // ✅ Hydrate do Supabase (pega tudo do servidor ao abrir)
+  // ----------------------
+  useEffect(() => {
+    const hydrate = async () => {
+      try {
+        const [uRes, rRes, cRes] = await Promise.all([
+          supabase.from('users').select('*').order('created_at', { ascending: false }),
+          supabase.from('requests').select('*').order('created_at', { ascending: false }),
+          supabase.from('chat_messages').select('*').order('created_at', { ascending: true }),
+        ]);
+
+        if (uRes.error) console.warn('Supabase users error:', uRes.error);
+        if (rRes.error) console.warn('Supabase requests error:', rRes.error);
+        if (cRes.error) console.warn('Supabase chat_messages error:', cRes.error);
+
+        const users = (uRes.data || []).map(mapUserRowToUser);
+        const reqs = (rRes.data || []).map(mapRequestRowToRequest);
+        const chats = (cRes.data || []).map(mapChatRowToChatMessage);
+
+        setRegisteredUsers(users);
+        setMaintenanceRequests(reqs);
+        setChatMessages(chats);
+
+        didHydrateRef.current = true;
+      } catch (e) {
+        console.warn('Hydrate failed (usando cache local):', e);
+        didHydrateRef.current = true;
+      }
+    };
+
+    hydrate();
+  }, []);
+
+  // ----------------------
+  // ✅ Realtime (admin vê OS / chat / users na hora)
+  // ----------------------
+  useEffect(() => {
+    const ch = supabase
+      .channel('zeloo-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, (payload) => {
+        const event = payload.eventType;
+        const newRow: any = payload.new;
+        const oldRow: any = payload.old;
+
+        if (event === 'DELETE') {
+          setMaintenanceRequests((prev) => prev.filter((r) => r.id !== String(oldRow?.id)));
+          return;
+        }
+
+        const mapped = mapRequestRowToRequest(newRow);
+        setMaintenanceRequests((prev) => {
+          const idx = prev.findIndex((r) => r.id === mapped.id);
+          if (idx >= 0) {
+            const copy = prev.slice();
+            copy[idx] = { ...copy[idx], ...mapped };
+            return copy;
+          }
+          return [mapped, ...prev];
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, (payload) => {
+        const event = payload.eventType;
+        const newRow: any = payload.new;
+        const oldRow: any = payload.old;
+
+        if (event === 'DELETE') {
+          setChatMessages((prev) => prev.filter((m) => m.id !== String(oldRow?.id)));
+          return;
+        }
+
+        const mapped = mapChatRowToChatMessage(newRow);
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.id === mapped.id)) return prev;
+          return [...prev, mapped];
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload) => {
+        const event = payload.eventType;
+        const newRow: any = payload.new;
+        const oldRow: any = payload.old;
+
+        if (event === 'DELETE') {
+          setRegisteredUsers((prev) => prev.filter((u) => u.id !== String(oldRow?.id)));
+          return;
+        }
+
+        const mapped = mapUserRowToUser(newRow);
+        setRegisteredUsers((prev) => {
+          const idx = prev.findIndex((u) => u.id === mapped.id);
+          if (idx >= 0) {
+            const copy = prev.slice();
+            copy[idx] = { ...copy[idx], ...mapped };
+            return copy;
+          }
+          return [mapped, ...prev];
+        });
+      });
+
+    ch.subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, []);
+
+  // ----------------------
+  // ✅ Salvar cache local (pra quando ficar sem net)
+  // ----------------------
   useEffect(() => {
     saveToLocal('branding', branding);
     saveToLocal('users', registeredUsers);
     saveToLocal('requests', maintenanceRequests);
     saveToLocal('admin', adminProfile);
     saveToLocal('chat_messages', chatMessages);
-    saveToLocal('current_user', currentUser);
-  }, [branding, registeredUsers, maintenanceRequests, adminProfile, chatMessages, currentUser, saveToLocal]);
+  }, [branding, registeredUsers, maintenanceRequests, adminProfile, chatMessages]);
 
-  // ✅ Sync entre abas
+  // ✅ Sync entre abas (cache local)
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (!e.key) return;
@@ -191,13 +369,12 @@ const App: React.FC = () => {
         if (e.key === 'zeloo_chat_messages') setChatMessages(e.newValue ? JSON.parse(e.newValue) : []);
         if (e.key === 'zeloo_branding') setBranding(e.newValue ? JSON.parse(e.newValue) : BRANDING_DATA);
         if (e.key === 'zeloo_admin') setAdminProfile(e.newValue ? JSON.parse(e.newValue) : adminProfile);
-        if (e.key === 'zeloo_current_user') setCurrentUser(e.newValue ? JSON.parse(e.newValue) : null);
       } catch {}
     };
 
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [adminProfile]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const navigateTo = useCallback((newView: string) => {
     setView(newView);
@@ -217,12 +394,12 @@ const App: React.FC = () => {
 
     if (!userData) return;
 
-    if (userData.isBlocked) {
+    if ((userData as any).isBlocked) {
       alert('Acesso bloqueado. Fale com o suporte.');
       return;
     }
 
-    if (userData.paymentStatus !== 'PAID') {
+    if ((userData as any).paymentStatus !== 'PAID') {
       alert('Seu acesso ainda não foi liberado. Envie o comprovante ou aguarde a auditoria.');
       return;
     }
@@ -232,60 +409,83 @@ const App: React.FC = () => {
     setShowLoginModal(false);
   };
 
-  const handleSendChatMessage = (text: string, sender: 'USER' | 'ADMIN', userId: string, userName: string) => {
+  // ✅ Envia chat e grava no Supabase (real time no admin)
+  const handleSendChatMessage = async (text: string, sender: 'USER' | 'ADMIN', userId: string, userName: string) => {
     const newMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: makeId(),
       userId,
       userName,
       text,
       sender,
-      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     };
-    setChatMessages(prev => [...prev, newMessage]);
+
+    // atualiza UI imediato (instantâneo)
+    setChatMessages((prev) => [...prev, newMessage]);
+
+    // grava no supabase
+    try {
+      await supabase.from('chat_messages').insert([
+        {
+          id: newMessage.id,
+          user_id: newMessage.userId,
+          user_name: newMessage.userName,
+          text: newMessage.text,
+          sender: newMessage.sender,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    } catch (e) {
+      console.warn('Falha ao salvar chat no Supabase:', e);
+    }
   };
 
-  const handleHandlePaymentAction = (userId: string, action: 'APPROVE' | 'REJECT') => {
-    setRegisteredUsers(prev => prev.map(u => {
-      if (u.id === userId) {
-        return {
-          ...u,
-          paymentStatus: action === 'APPROVE' ? 'PAID' : 'REJECTED',
-          isBlocked: action === 'REJECT'
-        };
-      }
-      return u;
-    }));
+  // ✅ Aprova/recusa pagamento e grava no Supabase (users)
+  const handleHandlePaymentAction = async (userId: string, action: 'APPROVE' | 'REJECT') => {
+    const paymentStatus = action === 'APPROVE' ? 'PAID' : 'REJECTED';
+    const isBlocked = action === 'REJECT';
 
-    if (action === 'APPROVE') {
-      alert('Pagamento aprovado com sucesso! O acesso do cliente já está liberado.');
+    setRegisteredUsers((prev) =>
+      prev.map((u) => (u.id === userId ? ({ ...u, paymentStatus, isBlocked } as any) : u))
+    );
+
+    try {
+      await supabase
+        .from('users')
+        .update({ payment_status: paymentStatus, is_blocked: isBlocked })
+        .eq('id', userId);
+    } catch (e) {
+      console.warn('Falha ao atualizar pagamento no Supabase:', e);
     }
+
+    if (action === 'APPROVE') alert('Pagamento aprovado com sucesso! O acesso do cliente já está liberado.');
 
     if (currentUser?.id === userId) {
-      setCurrentUser(prev => prev ? { ...prev, paymentStatus: action === 'APPROVE' ? 'PAID' : 'REJECTED' } : null);
+      setCurrentUser((prev) => (prev ? ({ ...prev, paymentStatus } as any) : null));
     }
   };
 
-  // ✅ AUTO-ARQUIVAMENTO
+  // ✅ AUTO-ARQUIVAMENTO: roda sempre que requests mudarem
   useEffect(() => {
     const now = Date.now();
     let changed = false;
 
     const updated = maintenanceRequests.map((r) => {
-      if (r.archived === true) return r;
+      if ((r as any).archived === true) return r;
 
-      if (r.status === ServiceStatus.COMPLETED && r.completedAt) {
-        const t = new Date(r.completedAt).getTime();
+      if (r.status === ServiceStatus.COMPLETED && (r as any).completedAt) {
+        const t = new Date((r as any).completedAt).getTime();
         if (Number.isFinite(t) && now - t > ARCHIVE_AFTER_MS) {
           changed = true;
-          return { ...r, archived: true };
+          return { ...(r as any), archived: true };
         }
       }
 
-      if (r.status === ServiceStatus.CANCELLED && r.cancelledAt) {
-        const t = new Date(r.cancelledAt).getTime();
+      if (r.status === ServiceStatus.CANCELLED && (r as any).cancelledAt) {
+        const t = new Date((r as any).cancelledAt).getTime();
         if (Number.isFinite(t) && now - t > ARCHIVE_AFTER_MS) {
           changed = true;
-          return { ...r, archived: true };
+          return { ...(r as any), archived: true };
         }
       }
 
@@ -299,40 +499,44 @@ const App: React.FC = () => {
     const now = Date.now();
     let changed = false;
 
-    setMaintenanceRequests(prev => {
+    setMaintenanceRequests((prev) => {
       const next = prev.map((r) => {
-        if (r.archived === true) return r;
+        if ((r as any).archived === true) return r;
 
         if (r.status === ServiceStatus.COMPLETED) {
-          const fallback = parsePtBrDate(r.createdAt) || new Date(r.createdAt);
-          const completedAt = r.completedAt || (Number.isFinite(fallback.getTime()) ? new Date(fallback).toISOString() : undefined);
+          const fallback = parsePtBrDate((r as any).createdAt) || new Date((r as any).createdAt);
+          const completedAt =
+            (r as any).completedAt ||
+            (Number.isFinite(fallback.getTime()) ? new Date(fallback).toISOString() : undefined);
 
           if (completedAt) {
             const t = new Date(completedAt).getTime();
             if (Number.isFinite(t) && now - t > ARCHIVE_AFTER_MS) {
               changed = true;
-              return { ...r, completedAt, archived: true };
+              return { ...(r as any), completedAt, archived: true };
             }
-            if (!r.completedAt) {
+            if (!(r as any).completedAt) {
               changed = true;
-              return { ...r, completedAt };
+              return { ...(r as any), completedAt };
             }
           }
         }
 
         if (r.status === ServiceStatus.CANCELLED) {
-          const fallback = parsePtBrDate(r.createdAt) || new Date(r.createdAt);
-          const cancelledAt = r.cancelledAt || (Number.isFinite(fallback.getTime()) ? new Date(fallback).toISOString() : undefined);
+          const fallback = parsePtBrDate((r as any).createdAt) || new Date((r as any).createdAt);
+          const cancelledAt =
+            (r as any).cancelledAt ||
+            (Number.isFinite(fallback.getTime()) ? new Date(fallback).toISOString() : undefined);
 
           if (cancelledAt) {
             const t = new Date(cancelledAt).getTime();
             if (Number.isFinite(t) && now - t > ARCHIVE_AFTER_MS) {
               changed = true;
-              return { ...r, cancelledAt, archived: true };
+              return { ...(r as any), cancelledAt, archived: true };
             }
-            if (!r.cancelledAt) {
+            if (!(r as any).cancelledAt) {
               changed = true;
-              return { ...r, cancelledAt };
+              return { ...(r as any), cancelledAt };
             }
           }
         }
@@ -346,17 +550,20 @@ const App: React.FC = () => {
     alert('Verificação concluída ✅ (arquivamento automático aplicado quando cabível)');
   };
 
-  // ✅ TRAVA FINAL
-  const currentUserLive = currentUser ? (registeredUsers.find(u => u.id === currentUser.id) || currentUser) : null;
-  const canAccessDashboard = !!currentUserLive && currentUserLive.paymentStatus === 'PAID' && !currentUserLive.isBlocked;
+  // ✅ TRAVA FINAL: decide se o usuário pode ver o Dashboard
+  const currentUserLive = currentUser ? (registeredUsers.find((u) => u.id === currentUser.id) || currentUser) : null;
+  const canAccessDashboard = !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
 
-  // ✅ PORTEIRO DE URL
+  // ✅ PORTEIRO DE URL (mata 404 e evita depender de Router)
   const pathname = window.location.pathname;
 
+  // /pos-pagamento?email=... -> renderiza PosPagamento diretamente
   if (pathname === '/pos-pagamento') {
     return (
       <PosPagamento
-        onBack={() => { window.location.href = '/'; }}
+        onBack={() => {
+          window.location.href = '/';
+        }}
         onApproved={(email) => {
           setPendingRegistration((prev: any) => ({
             ...(prev || {}),
@@ -369,14 +576,16 @@ const App: React.FC = () => {
     );
   }
 
-  // ✅ FIX PRINCIPAL AQUI: salvar no localStorage antes do redirect
+  // /criar-conta?email=... -> renderiza CreateAccount diretamente
   if (pathname === '/criar-conta') {
     return (
       <CreateAccount
-        onFinalize={(creds) => {
+        onFinalize={async (creds) => {
+          const id = makeId();
+
           const newUser: UserRegistration = {
-            ...pendingRegistration,
-            id: `user-${Date.now()}`,
+            ...(pendingRegistration || {}),
+            id,
             email: creds.email,
             password: creds.password,
             date: new Date().toLocaleDateString('pt-BR'),
@@ -386,25 +595,37 @@ const App: React.FC = () => {
             paymentStatus: 'PAID',
           } as any;
 
-          // ✅ salva IMEDIATO pra não perder no redirect
-          setRegisteredUsers(prev => {
-            const next = [...prev, newUser];
-            saveToLocal('users', next);
-            return next;
-          });
+          setRegisteredUsers((prev) => [newUser, ...prev]);
           setCurrentUser(newUser);
-          saveToLocal('current_user', newUser);
+          setView('DASHBOARD');
 
-          // se quiser, já joga pra dashboard ao voltar pro /
-          saveToLocal('last_view', 'DASHBOARD');
+          try {
+            await supabase.from('users').insert([
+              {
+                id: newUser.id,
+                name: (newUser as any).name ?? (pendingRegistration?.name ?? ''),
+                email: newUser.email,
+                password: newUser.password,
+                plan_name: (newUser as any).planName ?? pendingRegistration?.planName ?? '',
+                payment_status: (newUser as any).paymentStatus ?? 'PAID',
+                is_blocked: Boolean((newUser as any).isBlocked),
+                extra_visits_purchased: Number((newUser as any).extraVisitsPurchased ?? 0),
+              },
+            ]);
+          } catch (e) {
+            console.warn('Falha ao salvar usuário no Supabase:', e);
+          }
 
           window.location.href = '/';
         }}
-        onCancel={() => { window.location.href = '/'; }}
+        onCancel={() => {
+          window.location.href = '/';
+        }}
       />
     );
   }
 
+  // ✅ A partir daqui: seu app original por "view"
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 selection:bg-indigo-600 selection:text-white">
       {view === 'LANDING' && <Header onOpenLogin={() => setShowLoginModal(true)} />}
@@ -420,12 +641,18 @@ const App: React.FC = () => {
             />
             <Services
               onConsultCustomized={() => navigateTo('CUSTOM_CONSULTATION')}
-              onServiceClick={(s) => { setSelectedService(s); navigateTo('SERVICE_SELECTION'); }}
+              onServiceClick={(s) => {
+                setSelectedService(s);
+                navigateTo('SERVICE_SELECTION');
+              }}
             />
             <AIAssistant onOpenCounselor={() => navigateTo('SMART_COUNSELOR')} />
-            <BudgetGenerator isLoggedIn={!!currentUser} onAuthRequired={() => setShowLoginModal(true)} userPlan={currentUser?.planName} />
+            <BudgetGenerator isLoggedIn={!!currentUser} onAuthRequired={() => setShowLoginModal(true)} userPlan={(currentUser as any)?.planName} />
             <Pricing
-              onSelectPlan={(p) => { setSelectedPlan(p); navigateTo('CHECKOUT'); }}
+              onSelectPlan={(p) => {
+                setSelectedPlan(p);
+                navigateTo('CHECKOUT');
+              }}
               plans={availablePlans}
               onCondoBudgetClick={() => navigateTo('CONDO_BUDGET')}
               onBusinessBudgetClick={() => navigateTo('SMART_COUNSELOR')}
@@ -487,33 +714,65 @@ const App: React.FC = () => {
                   <Dashboard
                     onLogout={() => {
                       setCurrentUser(null);
-                      removeFromLocal('current_user');
                       setView('LANDING');
                     }}
                     userData={currentUserLive}
-                    requests={maintenanceRequests.filter(r => r.userId === currentUserLive.id)}
-                    chatMessages={chatMessages.filter(m => m.userId === currentUserLive.id)}
+                    requests={maintenanceRequests.filter((r) => (r as any).userId === currentUserLive.id)}
+                    chatMessages={chatMessages.filter((m) => (m as any).userId === currentUserLive.id)}
                     onSendChatMessage={handleSendChatMessage}
-                    onAddRequest={(d, u) => {
+                    onAddRequest={async (d, u) => {
                       if (!currentUserLive) return;
 
+                      const id = makeId();
+                      const nowIso = new Date().toISOString();
+
                       const newReq: MaintenanceRequest = {
-                        id: `req-${Date.now()}`,
+                        id,
                         userId: currentUserLive.id,
-                        userName: currentUserLive.name,
+                        userName: (currentUserLive as any).name,
                         description: d,
                         isUrgent: u,
                         status: ServiceStatus.PENDING,
                         createdAt: new Date().toLocaleDateString('pt-BR'),
                         visitCost: 0,
                         archived: false,
-                      };
+                      } as any;
 
-                      setMaintenanceRequests(prev => [newReq, ...prev]);
+                      setMaintenanceRequests((prev) => [newReq, ...prev]);
+
+                      try {
+                        await supabase.from('requests').insert([
+                          {
+                            id: newReq.id,
+                            user_id: newReq.userId,
+                            user_name: newReq.userName,
+                            description: newReq.description,
+                            is_urgent: Boolean((newReq as any).isUrgent),
+                            status: newReq.status,
+                            visit_cost: Number((newReq as any).visitCost ?? 0),
+                            archived: Boolean((newReq as any).archived ?? false),
+                            created_at: nowIso,
+                          },
+                        ]);
+                      } catch (e) {
+                        console.warn('Falha ao salvar OS no Supabase:', e);
+                      }
                     }}
                     onGoHome={() => setView('LANDING')}
-                    onApproveVisitCost={(rid) => setMaintenanceRequests(p => p.map(r => r.id === rid ? { ...r, status: ServiceStatus.SCHEDULED } : r))}
-                    onBuyExtraVisits={(uid, q) => setRegisteredUsers(p => p.map(u => u.id === uid ? { ...u, extraVisitsPurchased: (u.extraVisitsPurchased || 0) + q } : u))}
+                    onApproveVisitCost={async (rid) => {
+                      setMaintenanceRequests((p) => p.map((r) => ((r as any).id === rid ? ({ ...(r as any), status: ServiceStatus.SCHEDULED } as any) : r)));
+
+                      try {
+                        await supabase.from('requests').update({ status: ServiceStatus.SCHEDULED }).eq('id', rid);
+                      } catch (e) {
+                        console.warn('Falha ao atualizar status (SCHEDULED) no Supabase:', e);
+                      }
+                    }}
+                    onBuyExtraVisits={(uid, q) =>
+                      setRegisteredUsers((p) =>
+                        p.map((u) => ((u as any).id === uid ? ({ ...(u as any), extraVisitsPurchased: ((u as any).extraVisitsPurchased || 0) + q } as any) : u))
+                      )
+                    }
                   />
                 ) : (
                   <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white p-8">
@@ -521,11 +780,15 @@ const App: React.FC = () => {
                       <div className="text-5xl">⏳</div>
                       <h2 className="text-xl font-black uppercase tracking-widest">Acesso em análise</h2>
                       <p className="text-sm text-slate-300 font-semibold">
-                        Seu acesso ainda não foi liberado.<br />
+                        Seu acesso ainda não foi liberado.
+                        <br />
                         Envie o comprovante ou aguarde a auditoria da nossa equipe.
                       </p>
                       <button
-                        onClick={() => { setCurrentUser(null); removeFromLocal('current_user'); navigateTo('LANDING'); }}
+                        onClick={() => {
+                          setCurrentUser(null);
+                          navigateTo('LANDING');
+                        }}
                         className="mt-6 px-8 py-4 rounded-2xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all"
                       >
                         Voltar para Home
@@ -544,27 +807,64 @@ const App: React.FC = () => {
                   requests={maintenanceRequests}
                   chatMessages={chatMessages}
                   onSendChatMessage={handleSendChatMessage}
-                  onUpdateRequestStatus={(id, status, cost) =>
-                    setMaintenanceRequests(p => p.map(r => {
-                      if (r.id !== id) return r;
+                  onUpdateRequestStatus={async (id, status, cost) => {
+                    setMaintenanceRequests((p) =>
+                      p.map((r) => {
+                        if ((r as any).id !== id) return r;
 
-                      const next: MaintenanceRequest = {
-                        ...r,
-                        status,
-                        visitCost: cost ?? r.visitCost
-                      };
+                        const next: MaintenanceRequest = {
+                          ...(r as any),
+                          status,
+                          visitCost: cost ?? (r as any).visitCost,
+                        } as any;
 
-                      if (status === ServiceStatus.COMPLETED && !r.completedAt) next.completedAt = new Date().toISOString();
-                      if (status === ServiceStatus.CANCELLED && !r.cancelledAt) next.cancelledAt = new Date().toISOString();
+                        if (status === ServiceStatus.COMPLETED && !(r as any).completedAt) (next as any).completedAt = new Date().toISOString();
+                        if (status === ServiceStatus.CANCELLED && !(r as any).cancelledAt) (next as any).cancelledAt = new Date().toISOString();
 
-                      return next;
-                    }))
-                  }
-                  onLogout={() => { setIsSuperUser(false); setView('LANDING'); }}
+                        return next;
+                      })
+                    );
+
+                    try {
+                      const payload: any = { status };
+                      if (typeof cost === 'number') payload.visit_cost = cost;
+                      if (status === ServiceStatus.COMPLETED) payload.completed_at = new Date().toISOString();
+                      if (status === ServiceStatus.CANCELLED) payload.cancelled_at = new Date().toISOString();
+
+                      await supabase.from('requests').update(payload).eq('id', id);
+                    } catch (e) {
+                      console.warn('Falha ao atualizar request no Supabase:', e);
+                    }
+                  }}
+                  onLogout={() => {
+                    setIsSuperUser(false);
+                    setView('LANDING');
+                  }}
                   onGoHome={() => setView('LANDING')}
-                  onUpdateUserStatus={(uid, b) => setRegisteredUsers(p => p.map(u => u.id === uid ? { ...u, isBlocked: b } : u))}
-                  onDeleteUser={(uid) => setRegisteredUsers(p => p.filter(u => u.id !== uid))}
-                  onAdminReply={(rid, rep) => setMaintenanceRequests(p => p.map(r => r.id === rid ? { ...r, adminReply: rep } : r))}
+                  onUpdateUserStatus={async (uid, b) => {
+                    setRegisteredUsers((p) => p.map((u) => ((u as any).id === uid ? ({ ...(u as any), isBlocked: b } as any) : u)));
+                    try {
+                      await supabase.from('users').update({ is_blocked: b }).eq('id', uid);
+                    } catch (e) {
+                      console.warn('Falha ao atualizar bloqueio no Supabase:', e);
+                    }
+                  }}
+                  onDeleteUser={async (uid) => {
+                    setRegisteredUsers((p) => p.filter((u) => (u as any).id !== uid));
+                    try {
+                      await supabase.from('users').delete().eq('id', uid);
+                    } catch (e) {
+                      console.warn('Falha ao deletar usuário no Supabase:', e);
+                    }
+                  }}
+                  onAdminReply={async (rid, rep) => {
+                    setMaintenanceRequests((p) => p.map((r) => ((r as any).id === rid ? ({ ...(r as any), adminReply: rep } as any) : r)));
+                    try {
+                      await supabase.from('requests').update({ admin_reply: rep }).eq('id', rid);
+                    } catch (e) {
+                      console.warn('Falha ao salvar resposta admin no Supabase:', e);
+                    }
+                  }}
                   onHandlePaymentAction={handleHandlePaymentAction}
                   branding={branding}
                   setBranding={setBranding}
@@ -576,7 +876,10 @@ const App: React.FC = () => {
                   plan={selectedPlan}
                   adminConfig={adminProfile}
                   onCancel={() => navigateTo('LANDING')}
-                  onSuccess={(reg) => { setPendingRegistration(reg); navigateTo('PAYMENT_SUCCESS'); }}
+                  onSuccess={(reg) => {
+                    setPendingRegistration(reg);
+                    navigateTo('PAYMENT_SUCCESS');
+                  }}
                 />
               )}
 
@@ -585,7 +888,9 @@ const App: React.FC = () => {
                   planName={selectedPlan?.name || ''}
                   paymentStatus={pendingRegistration?.paymentStatus}
                   onContinue={() => navigateTo('CREATE_ACCOUNT')}
-                  onConfirmPayment={() => { window.location.href = '/pos-pagamento'; }}
+                  onConfirmPayment={() => {
+                    window.location.href = '/pos-pagamento';
+                  }}
                 />
               )}
 
@@ -605,19 +910,39 @@ const App: React.FC = () => {
 
               {view === 'CREATE_ACCOUNT' && (
                 <CreateAccount
-                  onFinalize={(creds) => {
+                  onFinalize={async (creds) => {
+                    const id = makeId();
+
                     const newUser: UserRegistration = {
-                      ...pendingRegistration,
-                      id: `user-${Date.now()}`,
+                      ...(pendingRegistration || {}),
+                      id,
                       email: creds.email,
                       password: creds.password,
                       date: new Date().toLocaleDateString('pt-BR'),
                       dueDate: 'Ativo',
                       isBlocked: false,
-                      extraVisitsPurchased: 0
-                    };
+                      extraVisitsPurchased: 0,
+                      paymentStatus: (pendingRegistration?.paymentStatus ?? 'PENDING') as any,
+                    } as any;
 
-                    setRegisteredUsers(prev => [...prev, newUser]);
+                    setRegisteredUsers((prev) => [newUser, ...prev]);
+
+                    try {
+                      await supabase.from('users').insert([
+                        {
+                          id: newUser.id,
+                          name: (newUser as any).name ?? pendingRegistration?.name ?? '',
+                          email: newUser.email,
+                          password: newUser.password,
+                          plan_name: (newUser as any).planName ?? pendingRegistration?.planName ?? '',
+                          payment_status: (newUser as any).paymentStatus ?? 'PENDING',
+                          is_blocked: Boolean((newUser as any).isBlocked),
+                          extra_visits_purchased: Number((newUser as any).extraVisitsPurchased ?? 0),
+                        },
+                      ]);
+                    } catch (e) {
+                      console.warn('Falha ao salvar usuário no Supabase:', e);
+                    }
 
                     if ((newUser as any).paymentStatus === 'PAID') {
                       setCurrentUser(newUser);
@@ -637,16 +962,24 @@ const App: React.FC = () => {
               {view === 'SMART_COUNSELOR' && (
                 <SmartCounselor
                   onBack={() => navigateTo('LANDING')}
-                  onViewPlans={() => { setView('LANDING'); setTimeout(() => document.getElementById('planos')?.scrollIntoView(), 100); }}
+                  onViewPlans={() => {
+                    setView('LANDING');
+                    setTimeout(() => document.getElementById('planos')?.scrollIntoView(), 100);
+                  }}
                 />
               )}
+
               {view === 'SERVICE_SELECTION' && selectedService && (
                 <ServiceSelection
                   service={selectedService}
                   onBack={() => navigateTo('LANDING')}
-                  onSelectSubService={() => { if (canAccessDashboard) navigateTo('DASHBOARD'); else setShowLoginModal(true); }}
+                  onSelectSubService={() => {
+                    if (canAccessDashboard) navigateTo('DASHBOARD');
+                    else setShowLoginModal(true);
+                  }}
                 />
               )}
+
               {view === 'CUSTOM_CONSULTATION' && <CustomConsultation onBack={() => navigateTo('LANDING')} />}
               {view === 'CONDO_BUDGET' && <CondoBudget onBack={() => navigateTo('LANDING')} />}
               {view === 'ABOUT_US' && <AboutUs onBack={() => navigateTo('LANDING')} onContact={() => navigateTo('CONTACT')} />}
