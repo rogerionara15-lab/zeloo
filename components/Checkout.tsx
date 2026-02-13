@@ -15,6 +15,7 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
   const [formData, setFormData] = useState({
     name: "",
     cpf: "",
+    phone: "", // ✅ NOVO
     cep: "",
     address: "",
     number: "",
@@ -30,9 +31,61 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
     return price;
   }, [plan]);
 
-  const handleGoToPayment = (e: React.FormEvent) => {
+  const handleGoToPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStep("PAYMENT");
+
+    // ✅ Validações simples
+    const email = (formData.email || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      alert("Informe um e-mail válido.");
+      return;
+    }
+
+    const phone = (formData.phone || "").trim();
+    if (!phone || phone.length < 8) {
+      alert("Informe um telefone/WhatsApp válido.");
+      return;
+    }
+
+    // ✅ Salvar os dados no Supabase antes de pagar
+    setLoading(true);
+    try {
+      const resp = await fetch("/api/save-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan_name: plan.name,
+          plan_tier: plan.tier,
+          plan_price: contractValue,
+          name: formData.name,
+          cpf: formData.cpf,
+          phone: formData.phone,
+          cep: formData.cep,
+          address: formData.address,
+          number: formData.number,
+          complement: formData.complement,
+          email,
+          source: "checkout",
+        }),
+      });
+
+      const data = await resp.json().catch(() => ({}));
+
+      if (!resp.ok) {
+        console.error("Erro no /api/save-lead:", data);
+        alert(data?.error || "Não foi possível salvar seus dados agora. Tente novamente.");
+        setLoading(false);
+        return;
+      }
+
+      // ✅ OK: segue para pagamento
+      setStep("PAYMENT");
+    } catch (err: any) {
+      console.error("Erro ao salvar dados:", err);
+      alert(err?.message || "Falha ao salvar seus dados.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleProcess = async () => {
@@ -91,10 +144,7 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
             <h2 className="text-2xl font-black uppercase tracking-tight">
               {step === "DETAILS" ? "1. Identificação" : "2. Pagamento"}
             </h2>
-            <button
-              onClick={onCancel}
-              className="text-[10px] font-black text-slate-400 uppercase hover:text-red-500"
-            >
+            <button onClick={onCancel} className="text-[10px] font-black text-slate-400 uppercase hover:text-red-500">
               Cancelar
             </button>
           </div>
@@ -121,6 +171,17 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
                 />
                 <input
                   required
+                  placeholder="Telefone / WhatsApp"
+                  name="phone"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  required
                   placeholder="E-mail"
                   type="email"
                   name="email"
@@ -128,22 +189,49 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
                 />
+                <input
+                  required
+                  placeholder="CEP"
+                  name="cep"
+                  value={formData.cep}
+                  onChange={(e) => setFormData({ ...formData, cep: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
+                />
               </div>
 
               <input
                 required
-                placeholder="Endereço"
+                placeholder="Endereço (Rua/Avenida)"
                 name="address"
                 value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
               />
 
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  required
+                  placeholder="Número"
+                  name="number"
+                  value={formData.number}
+                  onChange={(e) => setFormData({ ...formData, number: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
+                />
+                <input
+                  placeholder="Complemento (opcional)"
+                  name="complement"
+                  value={formData.complement}
+                  onChange={(e) => setFormData({ ...formData, complement: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
+                />
+              </div>
+
               <button
                 type="submit"
-                className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-indigo-700 transition-all"
+                disabled={loading}
+                className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-indigo-700 transition-all disabled:opacity-60"
               >
-                Próximo Passo
+                {loading ? "Salvando dados..." : "Próximo Passo"}
               </button>
             </form>
           )}
@@ -162,7 +250,7 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
               <button
                 onClick={handleProcess}
                 disabled={loading}
-                className="w-full py-6 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-2xl flex items-center justify-center gap-3"
+                className="w-full py-6 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-2xl flex items-center justify-center gap-3 disabled:opacity-60"
               >
                 {loading
                   ? "Abrindo Mercado Pago..."
@@ -174,9 +262,7 @@ const Checkout: React.FC<CheckoutProps> = ({ plan, adminConfig, onCancel, onSucc
 
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-2xl">
-            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4">
-              Você escolheu:
-            </p>
+            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4">Você escolheu:</p>
             <h3 className="text-2xl font-black mb-6">{plan.name}</h3>
             <ul className="space-y-3 mb-10">
               {plan.features.slice(0, 4).map((f, i) => (
