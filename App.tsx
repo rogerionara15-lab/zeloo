@@ -42,7 +42,6 @@ import { BRANDING_DATA } from './constants';
 
 // ✅ helper local (pra não dar erro no arquivar por data)
 const parsePtBrDate = (s: string): Date | null => {
-  // Espera "dd/mm/aaaa"
   const parts = s?.split('/');
   if (!parts || parts.length !== 3) return null;
 
@@ -57,9 +56,8 @@ const parsePtBrDate = (s: string): Date | null => {
 };
 
 // ✅ PRA TESTAR SEM ESPERAR 7 DIAS:
-// Troque temporariamente para 10_000 (10 segundos). Depois volte pra 7 dias.
+// const ARCHIVE_AFTER_MS = 10_000; // 10 segundos
 const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
-// const ARCHIVE_AFTER_MS = 10_000;
 
 const App: React.FC = () => {
   const [view, setView] = useState<string>('LANDING');
@@ -74,16 +72,26 @@ const App: React.FC = () => {
     try {
       const saved = localStorage.getItem(`zeloo_${key}`);
       return saved ? JSON.parse(saved) : defaultValue;
-    } catch (e) { return defaultValue; }
+    } catch (e) {
+      return defaultValue;
+    }
   }, []);
 
-  const saveToLocal = (key: string, data: any) => {
-    try { localStorage.setItem(`zeloo_${key}`, JSON.stringify(data)); } catch (e) {}
-  };
+  const saveToLocal = useCallback((key: string, data: any) => {
+    try {
+      localStorage.setItem(`zeloo_${key}`, JSON.stringify(data));
+    } catch (e) {}
+  }, []);
+
+  const removeFromLocal = useCallback((key: string) => {
+    try {
+      localStorage.removeItem(`zeloo_${key}`);
+    } catch (e) {}
+  }, []);
 
   const [branding, setBranding] = useState<BrandingInfo>(() => getFromLocal('branding', BRANDING_DATA));
   const [registeredUsers, setRegisteredUsers] = useState<UserRegistration[]>(() => getFromLocal('users', []));
-  const [currentUser, setCurrentUser] = useState<UserRegistration | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserRegistration | null>(() => getFromLocal('current_user', null));
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() => getFromLocal('requests', []));
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => getFromLocal('chat_messages', []));
 
@@ -101,7 +109,6 @@ const App: React.FC = () => {
       highlight: false,
       save: 'Plano temporário para teste',
     },
-
     {
       name: 'Central Essencial Residencial',
       tier: 'Mensal',
@@ -162,13 +169,15 @@ const App: React.FC = () => {
     pixKey: 'financeiro@zeloo.com'
   }));
 
+  // ✅ Persistência local
   useEffect(() => {
     saveToLocal('branding', branding);
     saveToLocal('users', registeredUsers);
     saveToLocal('requests', maintenanceRequests);
     saveToLocal('admin', adminProfile);
     saveToLocal('chat_messages', chatMessages);
-  }, [branding, registeredUsers, maintenanceRequests, adminProfile, chatMessages]);
+    saveToLocal('current_user', currentUser);
+  }, [branding, registeredUsers, maintenanceRequests, adminProfile, chatMessages, currentUser, saveToLocal]);
 
   // ✅ Sync entre abas
   useEffect(() => {
@@ -177,29 +186,18 @@ const App: React.FC = () => {
       if (!e.key.startsWith('zeloo_')) return;
 
       try {
-        if (e.key === 'zeloo_requests') {
-          setMaintenanceRequests(e.newValue ? JSON.parse(e.newValue) : []);
-        }
-        if (e.key === 'zeloo_users') {
-          setRegisteredUsers(e.newValue ? JSON.parse(e.newValue) : []);
-        }
-        if (e.key === 'zeloo_chat_messages') {
-          setChatMessages(e.newValue ? JSON.parse(e.newValue) : []);
-        }
-        if (e.key === 'zeloo_branding') {
-          setBranding(e.newValue ? JSON.parse(e.newValue) : BRANDING_DATA);
-        }
-        if (e.key === 'zeloo_admin') {
-          setAdminProfile(e.newValue ? JSON.parse(e.newValue) : adminProfile);
-        }
-      } catch {
-        // ignora
-      }
+        if (e.key === 'zeloo_requests') setMaintenanceRequests(e.newValue ? JSON.parse(e.newValue) : []);
+        if (e.key === 'zeloo_users') setRegisteredUsers(e.newValue ? JSON.parse(e.newValue) : []);
+        if (e.key === 'zeloo_chat_messages') setChatMessages(e.newValue ? JSON.parse(e.newValue) : []);
+        if (e.key === 'zeloo_branding') setBranding(e.newValue ? JSON.parse(e.newValue) : BRANDING_DATA);
+        if (e.key === 'zeloo_admin') setAdminProfile(e.newValue ? JSON.parse(e.newValue) : adminProfile);
+        if (e.key === 'zeloo_current_user') setCurrentUser(e.newValue ? JSON.parse(e.newValue) : null);
+      } catch {}
     };
 
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [adminProfile]);
 
   const navigateTo = useCallback((newView: string) => {
     setView(newView);
@@ -267,7 +265,7 @@ const App: React.FC = () => {
     }
   };
 
-  // ✅ AUTO-ARQUIVAMENTO: roda sempre que requests mudarem
+  // ✅ AUTO-ARQUIVAMENTO
   useEffect(() => {
     const now = Date.now();
     let changed = false;
@@ -275,7 +273,6 @@ const App: React.FC = () => {
     const updated = maintenanceRequests.map((r) => {
       if (r.archived === true) return r;
 
-      // COMPLETED -> olha completedAt
       if (r.status === ServiceStatus.COMPLETED && r.completedAt) {
         const t = new Date(r.completedAt).getTime();
         if (Number.isFinite(t) && now - t > ARCHIVE_AFTER_MS) {
@@ -284,7 +281,6 @@ const App: React.FC = () => {
         }
       }
 
-      // CANCELLED -> olha cancelledAt
       if (r.status === ServiceStatus.CANCELLED && r.cancelledAt) {
         const t = new Date(r.cancelledAt).getTime();
         if (Number.isFinite(t) && now - t > ARCHIVE_AFTER_MS) {
@@ -296,9 +292,7 @@ const App: React.FC = () => {
       return r;
     });
 
-    if (changed) {
-      setMaintenanceRequests(updated);
-    }
+    if (changed) setMaintenanceRequests(updated);
   }, [maintenanceRequests]);
 
   const handleClearOldCompletedRequests = () => {
@@ -352,20 +346,18 @@ const App: React.FC = () => {
     alert('Verificação concluída ✅ (arquivamento automático aplicado quando cabível)');
   };
 
-  // ✅ TRAVA FINAL: decide se o usuário pode ver o Dashboard
+  // ✅ TRAVA FINAL
   const currentUserLive = currentUser ? (registeredUsers.find(u => u.id === currentUser.id) || currentUser) : null;
   const canAccessDashboard = !!currentUserLive && currentUserLive.paymentStatus === 'PAID' && !currentUserLive.isBlocked;
 
-  // ✅ PORTEIRO DE URL (mata 404 e evita depender de Router)
+  // ✅ PORTEIRO DE URL
   const pathname = window.location.pathname;
 
-  // /pos-pagamento?email=... -> renderiza PosPagamento diretamente
   if (pathname === '/pos-pagamento') {
     return (
       <PosPagamento
         onBack={() => { window.location.href = '/'; }}
         onApproved={(email) => {
-          // garante que a criação de conta receba o email
           setPendingRegistration((prev: any) => ({
             ...(prev || {}),
             email,
@@ -377,7 +369,7 @@ const App: React.FC = () => {
     );
   }
 
-  // /criar-conta?email=... -> renderiza CreateAccount diretamente
+  // ✅ FIX PRINCIPAL AQUI: salvar no localStorage antes do redirect
   if (pathname === '/criar-conta') {
     return (
       <CreateAccount
@@ -391,12 +383,21 @@ const App: React.FC = () => {
             dueDate: 'Ativo',
             isBlocked: false,
             extraVisitsPurchased: 0,
-            paymentStatus: 'PAID', // veio do fluxo pago
+            paymentStatus: 'PAID',
           } as any;
 
-          setRegisteredUsers(prev => [...prev, newUser]);
+          // ✅ salva IMEDIATO pra não perder no redirect
+          setRegisteredUsers(prev => {
+            const next = [...prev, newUser];
+            saveToLocal('users', next);
+            return next;
+          });
           setCurrentUser(newUser);
-          setView('DASHBOARD');
+          saveToLocal('current_user', newUser);
+
+          // se quiser, já joga pra dashboard ao voltar pro /
+          saveToLocal('last_view', 'DASHBOARD');
+
           window.location.href = '/';
         }}
         onCancel={() => { window.location.href = '/'; }}
@@ -404,7 +405,6 @@ const App: React.FC = () => {
     );
   }
 
-  // ✅ A partir daqui: seu app original por "view"
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 selection:bg-indigo-600 selection:text-white">
       {view === 'LANDING' && <Header onOpenLogin={() => setShowLoginModal(true)} />}
@@ -485,7 +485,11 @@ const App: React.FC = () => {
               {view === 'DASHBOARD' && currentUserLive && (
                 canAccessDashboard ? (
                   <Dashboard
-                    onLogout={() => { setCurrentUser(null); setView('LANDING'); }}
+                    onLogout={() => {
+                      setCurrentUser(null);
+                      removeFromLocal('current_user');
+                      setView('LANDING');
+                    }}
                     userData={currentUserLive}
                     requests={maintenanceRequests.filter(r => r.userId === currentUserLive.id)}
                     chatMessages={chatMessages.filter(m => m.userId === currentUserLive.id)}
@@ -521,7 +525,7 @@ const App: React.FC = () => {
                         Envie o comprovante ou aguarde a auditoria da nossa equipe.
                       </p>
                       <button
-                        onClick={() => { setCurrentUser(null); navigateTo('LANDING'); }}
+                        onClick={() => { setCurrentUser(null); removeFromLocal('current_user'); navigateTo('LANDING'); }}
                         className="mt-6 px-8 py-4 rounded-2xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all"
                       >
                         Voltar para Home
@@ -550,12 +554,8 @@ const App: React.FC = () => {
                         visitCost: cost ?? r.visitCost
                       };
 
-                      if (status === ServiceStatus.COMPLETED && !r.completedAt) {
-                        next.completedAt = new Date().toISOString();
-                      }
-                      if (status === ServiceStatus.CANCELLED && !r.cancelledAt) {
-                        next.cancelledAt = new Date().toISOString();
-                      }
+                      if (status === ServiceStatus.COMPLETED && !r.completedAt) next.completedAt = new Date().toISOString();
+                      if (status === ServiceStatus.CANCELLED && !r.cancelledAt) next.cancelledAt = new Date().toISOString();
 
                       return next;
                     }))
@@ -619,7 +619,7 @@ const App: React.FC = () => {
 
                     setRegisteredUsers(prev => [...prev, newUser]);
 
-                    if (newUser.paymentStatus === 'PAID') {
+                    if ((newUser as any).paymentStatus === 'PAID') {
                       setCurrentUser(newUser);
                       navigateTo('DASHBOARD');
                       return;
@@ -665,7 +665,10 @@ const App: React.FC = () => {
           users={registeredUsers}
           onClose={() => setShowLoginModal(false)}
           onSuccess={handleLogin}
-          onGoToPlans={() => { setShowLoginModal(false); document.getElementById('planos')?.scrollIntoView({ behavior: 'smooth' }); }}
+          onGoToPlans={() => {
+            setShowLoginModal(false);
+            document.getElementById('planos')?.scrollIntoView({ behavior: 'smooth' });
+          }}
         />
       )}
     </div>

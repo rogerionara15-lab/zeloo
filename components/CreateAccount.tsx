@@ -26,6 +26,9 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
   }, [defaultEmail, emailFromUrl]);
 
   const [email, setEmail] = useState('');
+  const [emailDraft, setEmailDraft] = useState('');
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -33,78 +36,20 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
   const [info, setInfo] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [inviting, setInviting] = useState(false);
 
-  // ✅ mostra aviso de confirmação de e-mail quando necessário
-  const [awaitingEmailConfirm, setAwaitingEmailConfirm] = useState(false);
-
-  // ✅ Preenche email automaticamente se veio da URL
+  // Preenche email automaticamente se veio da URL/pagamento
   useEffect(() => {
-    if (lockedEmail) setEmail(lockedEmail);
+    if (lockedEmail) {
+      setEmail(lockedEmail);
+      setEmailDraft(lockedEmail);
+      setIsEditingEmail(false);
+    }
   }, [lockedEmail]);
-
-  // ✅ API: envia link para criar senha (plano B)
-  const requestInvite = async (emailToInvite: string) => {
-    const resp = await fetch('/api/request-invite', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: emailToInvite }),
-    });
-
-    let data: any = {};
-    try {
-      data = await resp.json();
-    } catch {
-      // ignore
-    }
-
-    if (resp.ok) {
-      return { ok: true as const, message: '✅ Link enviado! Verifique seu e-mail para criar a senha.' };
-    }
-
-    if (resp.status === 400) {
-      return { ok: false as const, message: 'Informe um e-mail válido para enviar o link.' };
-    }
-    if (resp.status === 403) {
-      return { ok: false as const, message: 'Este e-mail ainda não está aprovado no plano. Verifique o pagamento.' };
-    }
-
-    const details = data?.details || data?.error;
-    return {
-      ok: false as const,
-      message: `Não foi possível enviar o link agora.${details ? ` (${details})` : ''}`,
-    };
-  };
-
-  const handleInviteClick = async () => {
-    setError(null);
-    setInfo(null);
-
-    const cleanEmail = normalizeEmail(email);
-
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('Informe um e-mail válido.');
-      return;
-    }
-
-    setInviting(true);
-
-    try {
-      const result = await requestInvite(cleanEmail);
-      if (result.ok) setInfo(result.message);
-      else setError(result.message);
-    } catch (err: any) {
-      setError(`Erro ao enviar link. (${err?.message || 'erro desconhecido'})`);
-    }
-
-    setInviting(false);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setInfo(null);
-    setAwaitingEmailConfirm(false);
 
     const cleanEmail = normalizeEmail(email);
 
@@ -125,7 +70,7 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
 
     setLoading(true);
 
-    // ✅ 1) Bloqueia criação de conta se não estiver APPROVED no paid_access
+    // 1) Bloqueia criação de conta se não estiver APPROVED no paid_access
     try {
       const checkResp = await fetch('/api/check-approved', {
         method: 'POST',
@@ -154,8 +99,8 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
     }
 
     try {
-      // ✅ 2) Cria conta no Supabase Auth (login universal)
-      const { data, error: signUpError } = await supabase.auth.signUp({
+      // 2) Cria conta no Supabase Auth (login universal)
+      const { error: signUpError } = await supabase.auth.signUp({
         email: cleanEmail,
         password,
       });
@@ -166,20 +111,10 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
         return;
       }
 
-      // ✅ Se o projeto exigir confirmação por e-mail, data.session pode vir vazio
-      const needsConfirm = !data?.session;
-
       setLoading(false);
 
-      if (needsConfirm) {
-        setAwaitingEmailConfirm(true);
-        setInfo(
-          `✅ Conta criada! Agora confirme seu e-mail para liberar o acesso. Enviamos um link para: ${cleanEmail}. (Confira também o Spam/Lixo eletrônico.)`
-        );
-        return;
-      }
-
-      // ✅ Se não exigir confirmação, segue fluxo normal
+      // Como você desativou confirmação de e-mail no Supabase,
+      // o usuário já pode seguir direto.
       onFinalize({ email: cleanEmail, password });
     } catch (err: any) {
       console.error(err);
@@ -187,6 +122,9 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
       setLoading(false);
     }
   };
+
+  const canEditEmail = !!lockedEmail; // veio do pagamento
+  const emailDisabled = (canEditEmail && !isEditingEmail) || loading;
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 py-20 animate-in fade-in duration-700">
@@ -199,30 +137,7 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
           <h1 className="text-3xl font-black text-slate-900 mb-2">Configure seu Acesso</h1>
           <p className="text-slate-400 font-medium">
             Finalize seu cadastro definindo sua senha.
-            {lockedEmail ? ' Seu e-mail já foi vinculado ao pagamento.' : ''}
-          </p>
-        </div>
-
-        {/* Plano B: link por e-mail (discreto) */}
-        <div className="mb-6 bg-slate-50 border border-slate-100 rounded-2xl p-4">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
-            Já pagou mas ainda não tem senha?
-          </p>
-          <p className="text-xs text-slate-500 font-semibold leading-relaxed">
-            Se você está aprovado no plano, clique abaixo para receber um link e criar sua senha (login universal).
-          </p>
-
-          <button
-            type="button"
-            onClick={handleInviteClick}
-            disabled={inviting || loading}
-            className="mt-4 w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 disabled:opacity-60"
-          >
-            {inviting ? 'Enviando link...' : 'Enviar link para criar senha'}
-          </button>
-
-          <p className="mt-3 text-[10px] text-slate-400 font-bold">
-            * O link será enviado para o e-mail informado acima.
+            {lockedEmail ? ' Seu e-mail foi preenchido a partir do pagamento.' : ''}
           </p>
         </div>
 
@@ -230,13 +145,6 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
         {info && (
           <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-emerald-100 mb-4">
             {info}
-          </div>
-        )}
-
-        {/* Mensagem específica de confirmação */}
-        {awaitingEmailConfirm && !info && (
-          <div className="bg-amber-50 text-amber-800 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-amber-100 mb-4">
-            ✅ Conta criada! Confirme seu e-mail para liberar o acesso. Confira também o Spam/Lixo eletrônico.
           </div>
         )}
 
@@ -252,20 +160,80 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
             <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">
               E-mail de Login
             </label>
+
             <input
               required
               type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
+              value={canEditEmail ? (isEditingEmail ? emailDraft : email) : email}
+              onChange={(e) => {
+                if (canEditEmail) setEmailDraft(e.target.value);
+                else setEmail(e.target.value);
+              }}
               placeholder="exemplo@email.com"
-              readOnly={!!lockedEmail}
+              disabled={emailDisabled}
               className={`w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm outline-none transition-all font-bold
                 focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600
-                ${lockedEmail ? 'opacity-80 cursor-not-allowed' : ''}`}
+                ${emailDisabled ? 'opacity-80 cursor-not-allowed' : ''}`}
             />
-            {lockedEmail && (
+
+            {/* Botão Editar e-mail (só aparece quando veio do pagamento) */}
+            {canEditEmail && (
+              <div className="mt-3 flex gap-2">
+                {!isEditingEmail ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmailDraft(email || lockedEmail || '');
+                      setIsEditingEmail(true);
+                      setError(null);
+                      setInfo(null);
+                    }}
+                    disabled={loading}
+                    className="px-4 py-2 rounded-xl bg-amber-500 text-white font-black text-[10px] uppercase tracking-widest disabled:opacity-60"
+                  >
+                    Editar e-mail
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cleaned = normalizeEmail(emailDraft);
+                        if (!cleaned || !cleaned.includes('@')) {
+                          setError('Informe um e-mail válido.');
+                          return;
+                        }
+                        setEmail(cleaned);
+                        setIsEditingEmail(false);
+                        setInfo('✅ E-mail atualizado. Agora você pode criar sua conta.');
+                      }}
+                      disabled={loading}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-black text-[10px] uppercase tracking-widest disabled:opacity-60"
+                    >
+                      Salvar e-mail
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmailDraft(email || lockedEmail || '');
+                        setIsEditingEmail(false);
+                        setError(null);
+                        setInfo(null);
+                      }}
+                      disabled={loading}
+                      className="px-4 py-2 rounded-xl bg-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-widest disabled:opacity-60"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {canEditEmail && (
               <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-300">
-                Este e-mail veio do pagamento e não pode ser alterado.
+                Se digitou errado no pagamento, clique em <span className="text-slate-400">EDITAR E-MAIL</span>.
               </p>
             )}
           </div>
@@ -278,9 +246,10 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
               required
               type="password"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 outline-none transition-all font-bold"
+              disabled={loading}
+              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 outline-none transition-all font-bold disabled:opacity-60"
             />
           </div>
 
@@ -292,20 +261,27 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
               required
               type="password"
               value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 outline-none transition-all font-bold"
+              disabled={loading}
+              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 outline-none transition-all font-bold disabled:opacity-60"
             />
           </div>
 
           <div className="pt-4 space-y-3">
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || isEditingEmail}
               className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 disabled:opacity-60"
             >
               {loading ? 'Criando conta...' : 'Criar Minha Conta Zeloo'}
             </button>
+
+            {isEditingEmail && (
+              <p className="text-center text-[10px] font-black uppercase tracking-widest text-amber-600">
+                Salve o e-mail antes de criar a conta.
+              </p>
+            )}
 
             <button
               type="button"
