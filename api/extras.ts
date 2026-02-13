@@ -1,71 +1,104 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import mercadopago from 'mercadopago';
+const EXTRAS_VERSION = "extras-v2-2026-02-13";
 
-function normalizeEmail(email: string) {
-  return (email || '').trim().toLowerCase();
-}
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method Not Allowed', version: EXTRAS_VERSION });
+
   }
 
   try {
     const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
     if (!accessToken) {
-      return res.status(500).json({ error: 'Missing env: MERCADOPAGO_ACCESS_TOKEN' });
+      return res.status(500).json({
+        error: 'Missing MERCADOPAGO_ACCESS_TOKEN in server environment.',
+      });
     }
-
-    mercadopago.configure({ access_token: accessToken });
 
     const { email, quantity, price, title } = req.body || {};
-    const cleanEmail = normalizeEmail(email);
-    const qty = Number(quantity || 1);
-    const unitPrice = Number(price || 0);
 
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      return res.status(400).json({ error: 'Invalid email' });
+    const qty = Number(quantity);
+    const unitPrice = Number(price);
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid: email' });
     }
-    if (!qty || qty < 1) {
-      return res.status(400).json({ error: 'Invalid quantity' });
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({ error: 'Missing or invalid: quantity' });
     }
-    if (!unitPrice || unitPrice <= 0) {
-      return res.status(400).json({ error: 'Invalid price' });
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      return res.status(400).json({ error: 'Missing or invalid: price' });
     }
 
-    const preference = {
+    const itemTitle =
+      typeof title === 'string' && title.trim().length > 0
+        ? title.trim()
+        : `Zeloo - Atendimentos extras (${qty}x)`;
+
+    const host = req.headers?.['x-forwarded-host'] || req.headers?.host;
+    const proto = req.headers?.['x-forwarded-proto'] || 'https';
+    const baseUrl = host ? `${proto}://${host}` : '';
+
+    const successUrl = baseUrl ? `${baseUrl}/dashboard?extra=success` : undefined;
+    const failureUrl = baseUrl ? `${baseUrl}/dashboard?extra=failure` : undefined;
+    const pendingUrl = baseUrl ? `${baseUrl}/dashboard?extra=pending` : undefined;
+
+    const preferencePayload: any = {
       items: [
         {
-          title: title || `Zeloo - Atendimentos extras (${qty}x)`,
+          title: itemTitle,
           quantity: qty,
-          currency_id: 'BRL',
           unit_price: unitPrice,
+          currency_id: 'BRL',
         },
       ],
-      metadata: {
-        type: 'extra_visits',
-        email: cleanEmail,
-        quantity: qty,
-      },
+      payer: { email },
       back_urls: {
-        success: `${req.headers.origin}/payment-success?type=extras`,
-        failure: `${req.headers.origin}/dashboard`,
-        pending: `${req.headers.origin}/dashboard`,
+        success: successUrl,
+        failure: failureUrl,
+        pending: pendingUrl,
       },
       auto_return: 'approved',
+      external_reference: `extras:${email}:${Date.now()}`,
     };
 
-    const mpResp = await mercadopago.preferences.create(preference as any);
-    const init_point = mpResp?.body?.init_point;
-
-    if (!init_point) {
-      console.error('MP response missing init_point:', mpResp?.body);
-      return res.status(500).json({ error: 'Mercado Pago response missing init_point' });
+    if (!baseUrl) {
+      delete preferencePayload.back_urls;
+      delete preferencePayload.auto_return;
     }
 
-    return res.status(200).json({ init_point });
+    const mpResp = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(preferencePayload),
+    });
+
+    const mpJson = await mpResp.json().catch(() => null);
+
+    if (!mpResp.ok) {
+      return res.status(500).json({
+        error: 'Mercado Pago preference creation failed',
+        status: mpResp.status,
+        details: mpJson,
+      });
+    }
+
+    const initPoint = mpJson?.init_point;
+    if (!initPoint) {
+      return res.status(500).json({
+        error: 'Mercado Pago did not return init_point',
+        details: mpJson,
+      });
+    }
+
+    return res.status(200).json({ init_point: initPoint });
   } catch (err: any) {
-    console.error('EXTRAS API ERROR:', err?.message || err);
-    return res.status(500).json({ error: 'Internal Server Error', details: err?.message || String(err) });
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      details: err?.message || String(err),
+    });
   }
 }
