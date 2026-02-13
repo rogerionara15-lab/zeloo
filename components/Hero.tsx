@@ -34,7 +34,7 @@ const Hero: React.FC<HeroProps> = ({ onConsultPlans, onOpenAssistant, branding }
             </h1>
             
             <p className="text-xl md:text-2xl text-slate-500 max-w-2xl mb-14 leading-relaxed font-medium">
-              Esqueça a busca por profissionais. A Zeloo é o <span className="text-slate-950 font-black">Escudo de Engenharia</span> que protege seu lar através de inteligência preditiva e técnicos certificados.
+              Esqueça a busca por profissionais. A Zeloo é a <span className="text-slate-950 font-black"> sua melhor opçao</span> que protege seu lar através de inteligência preditiva e técnicos certificados.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-6 items-center">

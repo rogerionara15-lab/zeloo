@@ -222,35 +222,26 @@ const Dashboard: React.FC<DashboardProps> = ({
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     email,
-    quantity, // quantos atendimentos extras
-    price: unitPrice, // preco unitário
+    quantity,
+    price: unitPrice,
     title: `Zeloo - Atendimentos extras (${quantity}x)`,
   }),
 });
 
-// ✅ sempre tenta ler JSON
-const data = await resp.json().catch(() => ({}));
+const data = await resp.json();
 
 if (!resp.ok) {
-  console.error('Erro no /api/extras:', resp.status, data);
-  alert(
-    `Falha ao iniciar pagamento de extras. (status ${resp.status})` +
-      (data?.error ? `\nMotivo: ${data.error}` : '')
-  );
-  return;
+  console.error('Extras error:', data);
+  throw new Error(data?.error || 'Falha ao iniciar pagamento de extras');
 }
 
-const initPoint =
-  data?.init_point || data?.initPoint || data?.url || data?.checkout_url;
-
+const initPoint = data?.init_point;
 if (!initPoint) {
-  console.error('Resposta sem init_point:', data);
-  alert('Falha ao iniciar pagamento de extras. Resposta inválida do servidor.');
-  return;
+  throw new Error('init_point não retornou do servidor');
 }
 
-setShowExtraModal(false);
 window.location.href = initPoint;
+
 
 
 

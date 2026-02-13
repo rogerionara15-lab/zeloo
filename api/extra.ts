@@ -1,88 +1,121 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { MercadoPagoConfig, Preference } from "mercadopago";
-
-function getBaseUrl(req: VercelRequest) {
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  const proto = (req.headers["x-forwarded-proto"] as string) || "https";
-  if (host) return `${proto}://${host}`;
-  return "https://zeloo-gamma.vercel.app";
-}
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Method not allowed" });
+export default async function handler(req: any, res: any) {
+  // Só aceitamos POST
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
   }
 
   try {
-    const accessToken = (process.env.MERCADOPAGO_ACCESS_TOKEN ?? "").trim();
+    // Garantir token
+    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
     if (!accessToken) {
-      return res.status(500).json({ ok: false, error: "MERCADOPAGO_ACCESS_TOKEN não configurado" });
+      return res.status(500).json({
+        error: 'Missing MERCADOPAGO_ACCESS_TOKEN in server environment.',
+      });
     }
 
-    const { email, qty, unitPrice } = (req.body ?? {}) as {
-      email?: string;
-      qty?: number;
-      unitPrice?: number;
+    // Body
+    const { email, quantity, price, title } = req.body || {};
+
+    // Validações
+    const qty = Number(quantity);
+    const unitPrice = Number(price);
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid: email' });
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({ error: 'Missing or invalid: quantity' });
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      return res.status(400).json({ error: 'Missing or invalid: price' });
+    }
+
+    // Título padrão caso venha vazio
+    const itemTitle =
+      typeof title === 'string' && title.trim().length > 0
+        ? title.trim()
+        : `Zeloo - Atendimentos extras (${qty}x)`;
+
+    // URL base do site (pra voltar corretamente após pagamento)
+    // 1) se você tiver VITE_APP_URL no front, ok — mas aqui no backend,
+    // a gente usa o host da request como fallback.
+    const host = req.headers?.['x-forwarded-host'] || req.headers?.host;
+    const proto = req.headers?.['x-forwarded-proto'] || 'https';
+    const baseUrl = host ? `${proto}://${host}` : '';
+
+    // Rotas de retorno (ajuste se seu front usa outra página)
+    const successUrl = baseUrl ? `${baseUrl}/dashboard?extra=success` : undefined;
+    const failureUrl = baseUrl ? `${baseUrl}/dashboard?extra=failure` : undefined;
+    const pendingUrl = baseUrl ? `${baseUrl}/dashboard?extra=pending` : undefined;
+
+    // Monta preference
+    const preferencePayload: any = {
+      items: [
+        {
+          title: itemTitle,
+          quantity: qty,
+          unit_price: unitPrice,
+          currency_id: 'BRL',
+        },
+      ],
+
+      payer: {
+        email,
+      },
+
+      // Voltar pro seu site após pagamento
+      back_urls: {
+        success: successUrl,
+        failure: failureUrl,
+        pending: pendingUrl,
+      },
+
+      auto_return: 'approved',
+
+      // Identificador interno (ajuda a rastrear no MP)
+      external_reference: `extras:${email}:${Date.now()}`,
     };
 
-    const payerEmail = String(email ?? "").trim().toLowerCase();
-    if (!payerEmail || !payerEmail.includes("@")) {
-      return res.status(400).json({ ok: false, error: "email inválido" });
+    // Se baseUrl não existir (muito raro), remove back_urls pra não quebrar
+    if (!baseUrl) {
+      delete preferencePayload.back_urls;
+      delete preferencePayload.auto_return;
     }
 
-    const quantity = typeof qty === "number" && qty > 0 ? Math.floor(qty) : 1;
-    const price = typeof unitPrice === "number" && unitPrice > 0 ? unitPrice : 0;
+    // Chamada REST ao Mercado Pago
+    const mpResp = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(preferencePayload),
+    });
 
-    if (price <= 0) {
-      return res.status(400).json({ ok: false, error: "unitPrice inválido" });
+    const mpJson = await mpResp.json().catch(() => null);
+
+    if (!mpResp.ok) {
+      return res.status(500).json({
+        error: 'Mercado Pago preference creation failed',
+        details: mpJson,
+        status: mpResp.status,
+      });
     }
 
-    const baseUrl = getBaseUrl(req);
+    const initPoint = mpJson?.init_point;
+    if (!initPoint) {
+      return res.status(500).json({
+        error: 'Mercado Pago did not return init_point',
+        details: mpJson,
+      });
+    }
 
-    // identifica compra de extras
-    const external_reference = `EXTRA|${payerEmail}|QTY:${quantity}`;
-
-    // ✅ Tipagem relaxada (evita erro TS do SDK)
-    const items: any[] = [
-      {
-        title: `Zeloo - Atendimentos extras (x${quantity})`,
-        quantity: 1,
-        unit_price: price * quantity,
-        currency_id: "BRL",
-      },
-    ];
-
-    const client = new MercadoPagoConfig({ accessToken });
-    const preference = new Preference(client);
-
-    const prefResp = await preference.create({
-      body: {
-        items,
-
-        notification_url: `${baseUrl}/api/mercadopago/webhook`,
-        external_reference,
-        payer: { email: payerEmail },
-
-        back_urls: {
-          success: `${baseUrl}/pos-pagamento?email=${encodeURIComponent(payerEmail)}`,
-          pending: `${baseUrl}/pos-pagamento?email=${encodeURIComponent(payerEmail)}`,
-          failure: `${baseUrl}/?payment=failure&email=${encodeURIComponent(payerEmail)}`,
-        },
-
-        auto_return: "approved",
-      },
+    return res.status(200).json({ init_point: initPoint });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'Unexpected server error on /api/extras',
+      message: err?.message || String(err),
     });
-
-    const pref: any = (prefResp as any)?.body ?? prefResp;
-
-    return res.status(200).json({
-      ok: true,
-      preferenceId: pref?.id,
-      init_point: pref?.init_point,
-      sandbox_init_point: pref?.sandbox_init_point,
-    });
-  } catch (e: any) {
-    console.error("EXTRA CHECKOUT ERROR:", e);
-    return res.status(500).json({ ok: false, error: e?.message ?? "Erro desconhecido" });
   }
 }
