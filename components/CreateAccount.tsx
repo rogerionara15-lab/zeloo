@@ -8,32 +8,42 @@ interface CreateAccountProps {
   defaultEmail?: string;
 }
 
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
 const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, defaultEmail }) => {
   const location = useLocation();
 
   const emailFromUrl = useMemo(() => {
     const qs = new URLSearchParams(location.search);
-    return (qs.get('email') || '').trim().toLowerCase();
+    return normalizeEmail(qs.get('email') || '');
   }, [location.search]);
 
   const lockedEmail = useMemo(() => {
-    const e = (defaultEmail || emailFromUrl || '').trim().toLowerCase();
+    const e = normalizeEmail(defaultEmail || emailFromUrl || '');
     return e && e.includes('@') ? e : '';
   }, [defaultEmail, emailFromUrl]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [inviting, setInviting] = useState(false);
 
+  // ✅ mostra aviso de confirmação de e-mail quando necessário
+  const [awaitingEmailConfirm, setAwaitingEmailConfirm] = useState(false);
 
   // ✅ Preenche email automaticamente se veio da URL
   useEffect(() => {
     if (lockedEmail) setEmail(lockedEmail);
   }, [lockedEmail]);
+
+  // ✅ API: envia link para criar senha (plano B)
   const requestInvite = async (emailToInvite: string) => {
     const resp = await fetch('/api/request-invite', {
       method: 'POST',
@@ -70,7 +80,7 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
     setError(null);
     setInfo(null);
 
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = normalizeEmail(email);
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setError('Informe um e-mail válido.');
@@ -92,11 +102,11 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-        setError(null);
+    setError(null);
     setInfo(null);
+    setAwaitingEmailConfirm(false);
 
-
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = normalizeEmail(email);
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setError('Informe um e-mail válido.');
@@ -114,7 +124,8 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
     }
 
     setLoading(true);
-        // ✅ 1) Bloqueia criação de conta se não estiver APPROVED no paid_access
+
+    // ✅ 1) Bloqueia criação de conta se não estiver APPROVED no paid_access
     try {
       const checkResp = await fetch('/api/check-approved', {
         method: 'POST',
@@ -142,27 +153,35 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
       return;
     }
 
-
     try {
-      // ✅ Cria conta no Supabase Auth (login universal/cross-device)
+      // ✅ 2) Cria conta no Supabase Auth (login universal)
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: cleanEmail,
         password,
       });
 
       if (signUpError) {
-        // Erros comuns: email já existe, senha fraca, etc.
         setError(signUpError.message || 'Não foi possível criar a conta. Tente novamente.');
         setLoading(false);
         return;
       }
 
-      // Alguns projetos exigem confirmação por email.
-      // Mesmo assim, a conta é criada no Auth.
-      // Vamos seguir seu fluxo atual para finalizar cadastro local.
-      onFinalize({ email: cleanEmail, password });
+      // ✅ Se o projeto exigir confirmação por e-mail, data.session pode vir vazio
+      const needsConfirm = !data?.session;
+
       setLoading(false);
-    } catch (err) {
+
+      if (needsConfirm) {
+        setAwaitingEmailConfirm(true);
+        setInfo(
+          `✅ Conta criada! Agora confirme seu e-mail para liberar o acesso. Enviamos um link para: ${cleanEmail}. (Confira também o Spam/Lixo eletrônico.)`
+        );
+        return;
+      }
+
+      // ✅ Se não exigir confirmação, segue fluxo normal
+      onFinalize({ email: cleanEmail, password });
+    } catch (err: any) {
       console.error(err);
       setError('Erro inesperado ao criar a conta. Tente novamente.');
       setLoading(false);
@@ -183,6 +202,8 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
             {lockedEmail ? ' Seu e-mail já foi vinculado ao pagamento.' : ''}
           </p>
         </div>
+
+        {/* Plano B: link por e-mail (discreto) */}
         <div className="mb-6 bg-slate-50 border border-slate-100 rounded-2xl p-4">
           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
             Já pagou mas ainda não tem senha?
@@ -204,6 +225,28 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
             * O link será enviado para o e-mail informado acima.
           </p>
         </div>
+
+        {/* INFO */}
+        {info && (
+          <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-emerald-100 mb-4">
+            {info}
+          </div>
+        )}
+
+        {/* Mensagem específica de confirmação */}
+        {awaitingEmailConfirm && !info && (
+          <div className="bg-amber-50 text-amber-800 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-amber-100 mb-4">
+            ✅ Conta criada! Confirme seu e-mail para liberar o acesso. Confira também o Spam/Lixo eletrônico.
+          </div>
+        )}
+
+        {/* ERROR */}
+        {error && (
+          <div className="bg-red-50 text-red-600 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-red-100 mb-4">
+            ⚠️ {error}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">
@@ -254,12 +297,6 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ onFinalize, onCancel, def
               className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 outline-none transition-all font-bold"
             />
           </div>
-
-          {error && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-xl text-[10px] font-black uppercase text-center border border-red-100">
-              ⚠️ {error}
-            </div>
-          )}
 
           <div className="pt-4 space-y-3">
             <button
