@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Header from './components/Header';
 import Hero from './components/Hero';
 import Services from './components/Services';
@@ -46,7 +46,6 @@ import { supabase } from './services/supabaseClient';
 
 // ✅ helper local (pra não dar erro no arquivar por data)
 const parsePtBrDate = (s: string): Date | null => {
-  // Espera "dd/mm/aaaa"
   const parts = s?.split('/');
   if (!parts || parts.length !== 3) return null;
 
@@ -56,18 +55,14 @@ const parsePtBrDate = (s: string): Date | null => {
   const yyyy = Number(yyyyStr);
 
   if (!Number.isFinite(dd) || !Number.isFinite(mm) || !Number.isFinite(yyyy)) return null;
-
   return new Date(yyyy, mm - 1, dd);
 };
 
 // ✅ PRA TESTAR SEM ESPERAR 7 DIAS:
-// Troque temporariamente para 10_000 (10 segundos). Depois volte pra 7 dias.
-const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 // const ARCHIVE_AFTER_MS = 10_000;
+const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 const makeId = () => {
-  // uuid padrão (melhor pro Supabase)
-  // fallback só pra garantir
   // @ts-ignore
   return (crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 };
@@ -84,13 +79,19 @@ const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
     description: String(row.description ?? ''),
     isUrgent: Boolean(row.is_urgent ?? row.isUrgent ?? false),
     status: (row.status ?? ServiceStatus.PENDING) as any,
-    createdAt: String(row.created_at_label ?? row.createdAt ?? row.created_at ?? new Date().toLocaleDateString('pt-BR')),
+
+    // seu app usa pt-BR no createdAt (texto)
+    createdAt: row.created_at
+      ? new Date(row.created_at).toLocaleDateString('pt-BR')
+      : (row.createdAt ?? new Date().toLocaleDateString('pt-BR')),
+
     visitCost:
       typeof row.visit_cost === 'number'
         ? row.visit_cost
         : typeof row.visitCost === 'number'
           ? row.visitCost
           : (row.visit_cost != null ? Number(row.visit_cost) : 0),
+
     archived: Boolean(row.archived ?? false),
     adminReply: row.admin_reply ?? row.adminReply,
     completedAt: row.completed_at ?? row.completedAt,
@@ -99,17 +100,20 @@ const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
 };
 
 const mapChatRowToChatMessage = (row: any): ChatMessage => {
-  const ts = row.timestamp || row.created_at || new Date().toISOString();
+  // ✅ evita depender de coluna "timestamp"
+  const iso = row.created_at ?? row.timestamp ?? new Date().toISOString();
+  const timeLabel =
+    typeof iso === 'string'
+      ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
   return {
     id: String(row.id ?? ''),
     userId: String(row.user_id ?? row.userId ?? ''),
     userName: String(row.user_name ?? row.userName ?? 'Usuário'),
     text: String(row.text ?? ''),
     sender: (row.sender ?? 'USER') as any,
-    timestamp:
-      typeof ts === 'string' && ts.includes(':')
-        ? ts
-        : new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    timestamp: timeLabel,
   } as any;
 };
 
@@ -126,7 +130,6 @@ const mapUserRowToUser = (row: any): UserRegistration => {
     dueDate: row.due_date ?? row.dueDate ?? 'Ativo',
     extraVisitsPurchased: row.extra_visits_purchased ?? row.extraVisitsPurchased ?? 0,
 
-    // ✅ se você tiver campos de endereço na tabela users, eles já caem aqui:
     address: row.address,
     number: row.number,
     neighborhood: row.neighborhood,
@@ -138,7 +141,7 @@ const mapUserRowToUser = (row: any): UserRegistration => {
 };
 
 // ----------------------
-// Local cache helpers (opcional, mas ajuda se ficar sem net)
+// ✅ Local cache helpers (mantidos SOMENTE para branding/admin)
 // ----------------------
 const getFromLocal = (key: string, defaultValue: any) => {
   try {
@@ -164,14 +167,16 @@ const App: React.FC = () => {
   const [isSuperUser, setIsSuperUser] = useState(false);
   const [pendingRegistration, setPendingRegistration] = useState<any>(null);
 
+  // ✅ Pode continuar local (não interfere nos 3 problemas)
   const [branding, setBranding] = useState<BrandingInfo>(() => getFromLocal('branding', BRANDING_DATA));
-  const [registeredUsers, setRegisteredUsers] = useState<UserRegistration[]>(() => getFromLocal('users', []));
-  const [currentUser, setCurrentUser] = useState<UserRegistration | null>(null);
-  const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() => getFromLocal('requests', []));
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => getFromLocal('chat_messages', []));
 
-  // evita “loop” quando a gente hidrata do supabase
-  const didHydrateRef = useRef(false);
+  // ✅ AQUI ESTÁ A CORREÇÃO PRINCIPAL:
+  // ❌ não carregar users/requests/chat_messages do localStorage
+  // ✅ sempre começa vazio e hidrata do Supabase
+  const [registeredUsers, setRegisteredUsers] = useState<UserRegistration[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserRegistration | null>(null);
+  const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   const [availablePlans] = useState<PlanDetails[]>([
     {
@@ -263,11 +268,8 @@ const App: React.FC = () => {
         setRegisteredUsers(users);
         setMaintenanceRequests(reqs);
         setChatMessages(chats);
-
-        didHydrateRef.current = true;
       } catch (e) {
-        console.warn('Hydrate failed (usando cache local):', e);
-        didHydrateRef.current = true;
+        console.warn('Hydrate failed:', e);
       }
     };
 
@@ -275,7 +277,7 @@ const App: React.FC = () => {
   }, []);
 
   // ----------------------
-  // ✅ Realtime (admin vê OS / chat / users na hora)
+  // ✅ Realtime (admin vê OS / chat / users na hora, em QUALQUER DEVICE)
   // ----------------------
   useEffect(() => {
     const ch = supabase
@@ -347,34 +349,12 @@ const App: React.FC = () => {
   }, []);
 
   // ----------------------
-  // ✅ Salvar cache local (pra quando ficar sem net)
+  // ✅ Salvar cache local APENAS de branding/admin (não atrapalha realtime)
   // ----------------------
   useEffect(() => {
     saveToLocal('branding', branding);
-    saveToLocal('users', registeredUsers);
-    saveToLocal('requests', maintenanceRequests);
     saveToLocal('admin', adminProfile);
-    saveToLocal('chat_messages', chatMessages);
-  }, [branding, registeredUsers, maintenanceRequests, adminProfile, chatMessages]);
-
-  // ✅ Sync entre abas (cache local)
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key) return;
-      if (!e.key.startsWith('zeloo_')) return;
-
-      try {
-        if (e.key === 'zeloo_requests') setMaintenanceRequests(e.newValue ? JSON.parse(e.newValue) : []);
-        if (e.key === 'zeloo_users') setRegisteredUsers(e.newValue ? JSON.parse(e.newValue) : []);
-        if (e.key === 'zeloo_chat_messages') setChatMessages(e.newValue ? JSON.parse(e.newValue) : []);
-        if (e.key === 'zeloo_branding') setBranding(e.newValue ? JSON.parse(e.newValue) : BRANDING_DATA);
-        if (e.key === 'zeloo_admin') setAdminProfile(e.newValue ? JSON.parse(e.newValue) : adminProfile);
-      } catch {}
-    };
-
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [branding, adminProfile]);
 
   const navigateTo = useCallback((newView: string) => {
     setView(newView);
@@ -409,7 +389,7 @@ const App: React.FC = () => {
     setShowLoginModal(false);
   };
 
-  // ✅ Envia chat e grava no Supabase (real time no admin)
+  // ✅ Envia chat e grava no Supabase (realtime no admin)
   const handleSendChatMessage = async (text: string, sender: 'USER' | 'ADMIN', userId: string, userName: string) => {
     const newMessage: ChatMessage = {
       id: makeId(),
@@ -420,10 +400,11 @@ const App: React.FC = () => {
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     };
 
-    // atualiza UI imediato (instantâneo)
+    // UI imediata
     setChatMessages((prev) => [...prev, newMessage]);
 
-    // grava no supabase
+    // ✅ INSERT seguro: não depende de coluna "timestamp"
+    // Se sua tabela tiver created_at automático, ótimo.
     try {
       await supabase.from('chat_messages').insert([
         {
@@ -432,7 +413,7 @@ const App: React.FC = () => {
           user_name: newMessage.userName,
           text: newMessage.text,
           sender: newMessage.sender,
-          timestamp: new Date().toISOString(),
+          // NÃO manda timestamp aqui (pra não quebrar se a coluna não existir)
         },
       ]);
     } catch (e) {
@@ -552,7 +533,8 @@ const App: React.FC = () => {
 
   // ✅ TRAVA FINAL: decide se o usuário pode ver o Dashboard
   const currentUserLive = currentUser ? (registeredUsers.find((u) => u.id === currentUser.id) || currentUser) : null;
-  const canAccessDashboard = !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
+  const canAccessDashboard =
+    !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
 
   // ✅ PORTEIRO DE URL (mata 404 e evita depender de Router)
   const pathname = window.location.pathname;
@@ -647,7 +629,11 @@ const App: React.FC = () => {
               }}
             />
             <AIAssistant onOpenCounselor={() => navigateTo('SMART_COUNSELOR')} />
-            <BudgetGenerator isLoggedIn={!!currentUser} onAuthRequired={() => setShowLoginModal(true)} userPlan={(currentUser as any)?.planName} />
+            <BudgetGenerator
+              isLoggedIn={!!currentUser}
+              onAuthRequired={() => setShowLoginModal(true)}
+              userPlan={(currentUser as any)?.planName}
+            />
             <Pricing
               onSelectPlan={(p) => {
                 setSelectedPlan(p);
@@ -738,8 +724,10 @@ const App: React.FC = () => {
                         archived: false,
                       } as any;
 
+                      // UI imediata
                       setMaintenanceRequests((prev) => [newReq, ...prev]);
 
+                      // grava no supabase
                       try {
                         await supabase.from('requests').insert([
                           {
@@ -760,7 +748,11 @@ const App: React.FC = () => {
                     }}
                     onGoHome={() => setView('LANDING')}
                     onApproveVisitCost={async (rid) => {
-                      setMaintenanceRequests((p) => p.map((r) => ((r as any).id === rid ? ({ ...(r as any), status: ServiceStatus.SCHEDULED } as any) : r)));
+                      setMaintenanceRequests((p) =>
+                        p.map((r) =>
+                          (r as any).id === rid ? ({ ...(r as any), status: ServiceStatus.SCHEDULED } as any) : r
+                        )
+                      );
 
                       try {
                         await supabase.from('requests').update({ status: ServiceStatus.SCHEDULED }).eq('id', rid);
@@ -770,7 +762,11 @@ const App: React.FC = () => {
                     }}
                     onBuyExtraVisits={(uid, q) =>
                       setRegisteredUsers((p) =>
-                        p.map((u) => ((u as any).id === uid ? ({ ...(u as any), extraVisitsPurchased: ((u as any).extraVisitsPurchased || 0) + q } as any) : u))
+                        p.map((u) =>
+                          (u as any).id === uid
+                            ? ({ ...(u as any), extraVisitsPurchased: ((u as any).extraVisitsPurchased || 0) + q } as any)
+                            : u
+                        )
                       )
                     }
                   />
