@@ -121,7 +121,8 @@ const mapUserRowToUser = (row: any): UserRegistration => {
     id: String(row.id ?? ''),
     name: row.name ?? row.user_name ?? 'Cliente',
     email: row.email ?? '',
-    password: row.password ?? '',
+    password: row.password_hash ?? '',
+
     planName: row.plan_name ?? row.planName ?? '',
     paymentStatus: row.payment_status ?? row.paymentStatus ?? 'PENDING',
     isBlocked: Boolean(row.is_blocked ?? row.isBlocked ?? false),
@@ -546,7 +547,8 @@ const App: React.FC = () => {
           const payload = {
             name: (pendingRegistration?.name ?? '') as string,
             email: creds.email,
-            password: creds.password,
+            password_hash: creds.password,
+
             plan_name: (pendingRegistration?.planName ?? '') as string,
             payment_status: 'PAID',
             is_blocked: false,
@@ -835,7 +837,8 @@ const App: React.FC = () => {
                     const payload = {
                       name: (pendingRegistration?.name ?? '') as string,
                       email: creds.email,
-                      password: creds.password,
+                      password_hash: creds.password,
+
                       plan_name: (pendingRegistration?.planName ?? '') as string,
                       payment_status: (pendingRegistration?.paymentStatus ?? 'PENDING') as any,
                       is_blocked: false,
