@@ -1,9 +1,9 @@
-const EXTRAS_VERSION = "extras-v2-2026-02-13";
+
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Method Not Allowed', version: EXTRAS_VERSION });
+    
 
   }
 
