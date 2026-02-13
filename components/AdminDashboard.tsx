@@ -29,15 +29,7 @@ interface AdminDashboardProps {
   onClearOldCompletedRequests: () => void;
 }
 
-type TabId =
-  | 'OVERVIEW'
-  | 'FINANCIAL'
-  | 'REQUESTS'
-  | 'CONCIERGE'
-  | 'CLIENTS'
-  | 'EXTRA_ORDERS'
-  | 'INTEGRATION';
-
+type TabId = 'OVERVIEW' | 'FINANCIAL' | 'REQUESTS' | 'CONCIERGE' | 'CLIENTS' | 'EXTRA_ORDERS';
 type ArchiveView = 'ACTIVE' | 'ARCHIVED';
 
 /** ✅ Pedidos de atendimentos extras (registrados localmente por enquanto) */
@@ -55,8 +47,7 @@ type ExtraOrder = {
   status: ExtraOrderStatus;
 };
 
-const brl = (value: number) =>
-  value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const brl = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const safeNumber = (v: any, fallback: number) => {
   const n = Number(v);
@@ -108,6 +99,26 @@ const readExtraOrdersFromLocal = (): ExtraOrder[] => {
   }
 };
 
+const LAST_SEEN_KEY = 'zeloo_admin_last_seen_v1';
+
+const readLastSeenMap = (): Record<string, string> => {
+  try {
+    const raw = localStorage.getItem(LAST_SEEN_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+
+const writeLastSeenMap = (m: Record<string, string>) => {
+  try {
+    localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(m));
+  } catch {}
+};
+
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onClearOldCompletedRequests,
   profile,
@@ -126,6 +137,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAdminReply,
   onUpdateUserStatus,
 }) => {
+  // evita warning de “unused props” caso ESLint seja chato
+  void profile;
+  void setProfile;
+  void branding;
+  void setBranding;
+
   const [activeTab, setActiveTab] = useState<TabId>('OVERVIEW');
   const [viewingProof, setViewingProof] = useState<string | null>(null);
 
@@ -141,9 +158,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // ✅ Modal Responder
   const [replyModalOpen, setReplyModalOpen] = useState(false);
   const [replyTarget, setReplyTarget] = useState<MaintenanceRequest | null>(null);
-  const [replyText, setReplyText] = useState(
-    'Recebemos seu chamado. Agendaremos um técnico para as próximas 24h.'
-  );
+  const [replyText, setReplyText] = useState('Recebemos seu chamado. Agendaremos um técnico para as próximas 24h.');
 
   // ✅ Modal Concluir Horas
   const [hoursModalOpen, setHoursModalOpen] = useState(false);
@@ -154,13 +169,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [extraOrders, setExtraOrders] = useState<ExtraOrder[]>([]);
   const [extraSearch, setExtraSearch] = useState('');
 
+  // ✅ concierge “não lidas”
+  const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>({});
+
   useEffect(() => {
     setExtraOrders(readExtraOrdersFromLocal());
+    setLastSeenMap(readLastSeenMap());
 
     const onStorage = (e: StorageEvent) => {
-      if (e.key === 'zeloo_extra_orders') {
-        setExtraOrders(readExtraOrdersFromLocal());
-      }
+      if (e.key === 'zeloo_extra_orders') setExtraOrders(readExtraOrdersFromLocal());
+      if (e.key === LAST_SEEN_KEY) setLastSeenMap(readLastSeenMap());
     };
 
     window.addEventListener('storage', onStorage);
@@ -169,18 +187,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const stats = useMemo(
     () => ({
-      totalPaid: users.filter((u: any) => u?.paymentStatus === 'PAID').length,
-      awaiting: users.filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL').length,
-      pendingReq: requests.filter((r) => r.status === ServiceStatus.PENDING).length,
+      totalPaid: (users || []).filter((u: any) => u?.paymentStatus === 'PAID').length,
+      awaiting: (users || []).filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL').length,
+      pendingReq: (requests || []).filter((r) => r.status === ServiceStatus.PENDING).length,
     }),
     [users, requests]
   );
 
   const filteredUsers = useMemo(() => {
+    const base = users || [];
     const q = clientSearch.trim().toLowerCase();
-    if (!q) return users;
+    if (!q) return base;
 
-    return users.filter((u: any) => {
+    return base.filter((u: any) => {
       if (!u) return false;
       const name = String(u?.name ?? '').toLowerCase();
       const email = String(u?.email ?? '').toLowerCase();
@@ -191,7 +210,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [users, clientSearch]);
 
   const filteredRequests = useMemo(() => {
-    const base = requests
+    const base = (requests || [])
       .slice()
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
@@ -200,9 +219,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return requestArchiveView === 'ARCHIVED' ? isArchived : !isArchived;
     });
 
-    return byArchive.filter((r) =>
-      requestStatusFilter === 'ALL' ? true : r.status === requestStatusFilter
-    );
+    return byArchive.filter((r) => (requestStatusFilter === 'ALL' ? true : r.status === requestStatusFilter));
   }, [requests, requestArchiveView, requestStatusFilter]);
 
   const conciergeUsers = useMemo(() => {
@@ -235,9 +252,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     }
 
-    const list = Array.from(map.values()).sort((a, b) =>
-      (b.lastTime || '').localeCompare(a.lastTime || '')
-    );
+    const list = Array.from(map.values()).sort((a, b) => (b.lastTime || '').localeCompare(a.lastTime || ''));
 
     return !q
       ? list
@@ -259,14 +274,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return found?.userName || 'Usuário';
   }, [chatMessages, selectedChatUserId]);
 
-  const handleBrandingChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setBranding({ ...branding, [name]: value });
+  const getLastUserMessageTime = (userId: string) => {
+    const msgs = (chatMessages || []).filter((m) => m.userId === userId);
+    const lastUser = msgs
+      .filter((m) => m.sender === 'USER')
+      .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))[0];
+    return lastUser?.timestamp || '';
   };
 
-  const handleGatewayUpdate = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setProfile({ ...profile, [name]: value as any });
+  const unreadCountByUser = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const u of conciergeUsers) {
+      const lastUserTime = getLastUserMessageTime(u.userId);
+      const lastSeen = lastSeenMap[u.userId] || '';
+      const hasUnread = lastUserTime && lastUserTime > lastSeen;
+      map[u.userId] = hasUnread ? 1 : 0;
+    }
+    return map;
+  }, [conciergeUsers, lastSeenMap, chatMessages]);
+
+  const totalUnreadConcierge = useMemo(() => {
+  return (Object.values(unreadCountByUser) as number[]).reduce((a, b) => a + b, 0);
+}, [unreadCountByUser]);
+
+
+  const markConversationAsSeen = (userId: string) => {
+    const lastTime = getLastUserMessageTime(userId);
+    if (!lastTime) return;
+
+    const next = { ...lastSeenMap, [userId]: lastTime };
+    setLastSeenMap(next);
+    writeLastSeenMap(next);
   };
 
   const renderPaymentBadge = (u: any) => {
@@ -309,15 +347,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     onAdminReply(replyTarget.id, msg);
-
-    // mantém o seu padrão
-    // OBS: se ServiceStatus.ANALYZED não existir no seu enum, troque por ServiceStatus.SCHEDULED
-    onUpdateRequestStatus(replyTarget.id, (ServiceStatus as any).ANALYZED ?? ServiceStatus.SCHEDULED, 1);
+    onUpdateRequestStatus(replyTarget.id, ServiceStatus.SCHEDULED);
 
     setReplyModalOpen(false);
     setReplyTarget(null);
     setReplyText('Recebemos seu chamado. Agendaremos um técnico para as próximas 24h.');
-    alert('Chamado respondido com sucesso!');
+    alert('Chamado respondido e marcado como AGENDADO ✅');
   };
 
   // ✅ Horas modal handlers
@@ -377,10 +412,56 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch {}
   };
 
+  const RequestActions: React.FC<{ req: MaintenanceRequest }> = ({ req }) => {
+    const canAct = req.archived !== true && req.status !== ServiceStatus.COMPLETED && req.status !== ServiceStatus.CANCELLED;
+    return (
+      <div className="flex gap-3 flex-wrap">
+        {req.status === ServiceStatus.PENDING && req.archived !== true && (
+          <>
+            <button
+              onClick={() => openReplyModal(req)}
+              className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-slate-950 transition-all"
+            >
+              Responder
+            </button>
+
+            <button
+              onClick={() => onUpdateRequestStatus(req.id, ServiceStatus.SCHEDULED)}
+              className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all"
+            >
+              Agendar
+            </button>
+          </>
+        )}
+
+        {req.status === ServiceStatus.SCHEDULED && req.archived !== true && (
+          <button
+            onClick={() => openHoursModal(req)}
+            className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-700 transition-all"
+          >
+            Concluir (Horas)
+          </button>
+        )}
+
+        {canAct && (
+          <button
+            onClick={() => {
+              const ok = confirm('Deseja cancelar este chamado?');
+              if (ok) onUpdateRequestStatus(req.id, ServiceStatus.CANCELLED);
+            }}
+            className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
+          >
+            Cancelar
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 overflow-hidden text-slate-900 font-sans">
-      <aside className="w-full md:w-80 bg-slate-950 text-white p-10 flex flex-col shrink-0 shadow-2xl z-[60]">
-        <div className="flex items-center gap-4 mb-16 cursor-pointer" onClick={onGoHome}>
+      <aside className="w-full md:w-80 bg-slate-950 text-white p-8 md:p-10 flex flex-col shrink-0 shadow-2xl z-[60]">
+        <div className="flex items-center gap-4 mb-10 md:mb-16 cursor-pointer" onClick={onGoHome}>
           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center font-black text-2xl">
             Z
           </div>
@@ -392,10 +473,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { id: 'OVERVIEW', label: 'Início', icon: '📊' },
             { id: 'FINANCIAL', label: 'Auditoria Pix', icon: '💰', badge: stats.awaiting },
             { id: 'REQUESTS', label: 'O.S Pendentes', icon: '🔧', badge: stats.pendingReq },
-            { id: 'CONCIERGE', label: 'Concierge', icon: '💬' },
+            { id: 'CONCIERGE', label: 'Concierge', icon: '💬', badge: totalUnreadConcierge },
             { id: 'CLIENTS', label: 'Base Assinantes', icon: '👥' },
             { id: 'EXTRA_ORDERS', label: 'Atend. Extras', icon: '➕', badge: extraTotals.pending },
-            { id: 'INTEGRATION', label: 'Integração', icon: '⚙️' },
           ].map((item) => (
             <button
               key={item.id}
@@ -421,29 +501,43 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         <button
           onClick={onLogout}
-          className="mt-10 py-5 text-red-500 font-black text-[10px] uppercase border border-red-500/20 rounded-2xl hover:bg-red-500/10 transition-all"
+          className="mt-8 md:mt-10 py-5 text-red-500 font-black text-[10px] uppercase border border-red-500/20 rounded-2xl hover:bg-red-500/10 transition-all"
         >
           Encerrar Sessão
         </button>
       </aside>
 
-      <main className="flex-1 p-8 md:p-16 overflow-y-auto">
+      <main className="flex-1 p-5 sm:p-8 md:p-16 overflow-y-auto">
         {activeTab === 'OVERVIEW' && (
           <div className="animate-in fade-in space-y-12">
-            <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase">Painel de Controle</h1>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+            <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tighter uppercase">
+              Painel de Controle
+            </h1>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+              <div className="bg-white p-8 md:p-10 rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total Pagos</p>
-                <p className="text-6xl font-black text-indigo-600 tracking-tighter">{stats.totalPaid}</p>
+                <p className="text-5xl md:text-6xl font-black text-indigo-600 tracking-tighter">{stats.totalPaid}</p>
               </div>
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-8 md:p-10 rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Pix em Auditoria</p>
-                <p className="text-6xl font-black text-amber-500 tracking-tighter">{stats.awaiting}</p>
+                <p className="text-5xl md:text-6xl font-black text-amber-500 tracking-tighter">{stats.awaiting}</p>
               </div>
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-8 md:p-10 rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Serviços Abertos</p>
-                <p className="text-6xl font-black text-red-500 tracking-tighter">{stats.pendingReq}</p>
+                <p className="text-5xl md:text-6xl font-black text-red-500 tracking-tighter">{stats.pendingReq}</p>
               </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-6 md:p-8 text-slate-500">
+              <p className="text-sm font-semibold">
+                Diagnóstico rápido: <span className="font-black">{users?.length ?? 0}</span> usuários,{' '}
+                <span className="font-black">{requests?.length ?? 0}</span> chamados,{' '}
+                <span className="font-black">{chatMessages?.length ?? 0}</span> mensagens.
+              </p>
+              <p className="text-[11px] font-bold mt-2">
+                Se “Usuários” e “Chamados” estiverem vindo 0 aqui, o problema costuma estar no App.tsx (carregamento do Supabase).
+              </p>
             </div>
           </div>
         )}
@@ -451,8 +545,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {activeTab === 'FINANCIAL' && (
           <div className="animate-in slide-in-from-right-10 space-y-8">
             <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Validar Pagamentos</h2>
-            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-x-auto">
-              <table className="w-full text-left min-w-[1200px]">
+
+            <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 shadow-xl overflow-x-auto">
+              <table className="w-full text-left min-w-[900px]">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
                     <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Assinante</th>
@@ -461,7 +556,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {users
+                  {(users || [])
                     .filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL')
                     .map((u: any) => (
                       <tr key={u.id}>
@@ -498,6 +593,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </td>
                       </tr>
                     ))}
+                  {(users || []).filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL').length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-8 py-20 text-center text-slate-300 font-black uppercase text-xs">
+                        Nenhum pagamento em auditoria
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -514,7 +616,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </p>
               </div>
 
-              <div className="flex gap-3 flex-wrap items-end">
+              <div className="flex gap-3 flex-wrap items-end w-full md:w-auto">
                 <div className="flex bg-white border border-slate-200 rounded-2xl overflow-hidden">
                   <button
                     onClick={() => setRequestArchiveView('ACTIVE')}
@@ -562,14 +664,84 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     );
                     if (ok) onClearOldCompletedRequests();
                   }}
-                  className="px-6 py-4 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
+                  className="w-full md:w-auto px-6 py-4 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
                 >
                   🧹 Aplicar arquivamento
                 </button>
               </div>
             </div>
 
-            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden">
+            {/* ✅ MOBILE (cards) */}
+            <div className="md:hidden space-y-4">
+              {filteredRequests.length === 0 ? (
+                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-10 text-center text-slate-300 font-black uppercase text-xs">
+                  Nenhum chamado nesse filtro
+                </div>
+              ) : (
+                filteredRequests.map((req) => (
+                  <div key={req.id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-black text-slate-900">{req.userName}</p>
+                        <p className="text-[10px] text-slate-400 uppercase mt-1">{req.createdAt}</p>
+                        <p className="text-[10px] text-slate-400 font-mono mt-1">ID: {req.id}</p>
+                      </div>
+                      <div className="shrink-0">
+                        {req.status === ServiceStatus.PENDING && (
+                          <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-[9px] font-black uppercase">
+                            Recebido
+                          </span>
+                        )}
+                        {req.status === ServiceStatus.SCHEDULED && (
+                          <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase">
+                            Agendado
+                          </span>
+                        )}
+                        {req.status === ServiceStatus.COMPLETED && (
+                          <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase">
+                            Concluído
+                          </span>
+                        )}
+                        {req.status === ServiceStatus.CANCELLED && (
+                          <span className="px-3 py-1 rounded-full bg-red-50 text-red-700 text-[9px] font-black uppercase">
+                            Cancelado
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="text-sm font-semibold text-slate-700 whitespace-pre-wrap break-words">
+                      {req.description}
+                    </div>
+
+                    {req.isUrgent && <div className="text-[10px] font-black text-red-500 uppercase">🚨 EMERGÊNCIA</div>}
+
+                    {req.adminReply && (
+                      <div className="text-[12px] text-slate-600">
+                        <span className="font-black uppercase text-slate-400">Admin:</span> {req.adminReply}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-600 uppercase">
+                        {typeof req.visitCost === 'number' ? `${req.visitCost}h` : '—'}
+                      </span>
+
+                      {req.archived === true && (
+                        <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black uppercase">
+                          Arquivado
+                        </span>
+                      )}
+                    </div>
+
+                    <RequestActions req={req} />
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* ✅ DESKTOP (tabela) */}
+            <div className="hidden md:block bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50">
                   <tr>
@@ -631,13 +803,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             Cancelado
                           </span>
                         )}
-                        {![ServiceStatus.PENDING, ServiceStatus.SCHEDULED, ServiceStatus.COMPLETED, ServiceStatus.CANCELLED].includes(
-                          req.status
-                        ) && (
-                          <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black uppercase">
-                            {req.status}
-                          </span>
-                        )}
                       </td>
 
                       <td className="px-8 py-6">
@@ -647,27 +812,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </td>
 
                       <td className="px-8 py-6">
-                        <div className="flex gap-3 flex-wrap">
-                          {req.status !== ServiceStatus.COMPLETED &&
-                            req.status !== ServiceStatus.CANCELLED &&
-                            req.archived !== true && (
-                              <button
-                                onClick={() => openHoursModal(req)}
-                                className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-700 transition-all"
-                              >
-                                Concluir (Horas)
-                              </button>
-                            )}
-
-                          {req.status === ServiceStatus.PENDING && req.archived !== true && (
-                            <button
-                              onClick={() => openReplyModal(req)}
-                              className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-slate-950 transition-all"
-                            >
-                              Responder
-                            </button>
-                          )}
-                        </div>
+                        <RequestActions req={req} />
                       </td>
                     </tr>
                   ))}
@@ -708,10 +853,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden">
-                <div className="px-8 py-6 bg-slate-50 border-b border-slate-100">
+                <div className="px-8 py-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                     Conversas ({conciergeUsers.length})
                   </p>
+                  {totalUnreadConcierge > 0 ? (
+                    <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black">
+                      {totalUnreadConcierge} novas
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="divide-y divide-slate-50 max-h-[650px] overflow-y-auto">
@@ -722,10 +872,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   ) : (
                     conciergeUsers.map((u) => {
                       const isSelected = selectedChatUserId === u.userId;
+                      const unread = unreadCountByUser[u.userId] === 1;
+
                       return (
                         <button
                           key={u.userId}
-                          onClick={() => setSelectedChatUserId(u.userId)}
+                          onClick={() => {
+                            setSelectedChatUserId(u.userId);
+                            markConversationAsSeen(u.userId);
+                          }}
                           className={`w-full text-left px-8 py-6 transition-all ${
                             isSelected ? 'bg-indigo-600 text-white' : 'hover:bg-slate-50'
                           }`}
@@ -747,13 +902,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 {u.userId}
                               </p>
                             </div>
-                            <span
-                              className={`text-[9px] font-black uppercase ${
-                                isSelected ? 'text-indigo-100' : 'text-slate-400'
-                              }`}
-                            >
-                              {u.lastTime || ''}
-                            </span>
+
+                            <div className="flex items-center gap-2">
+                              {unread ? (
+                                <span className={`bg-red-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black`}>
+                                  1
+                                </span>
+                              ) : null}
+                              <span
+                                className={`text-[9px] font-black uppercase ${
+                                  isSelected ? 'text-indigo-100' : 'text-slate-400'
+                                }`}
+                              >
+                                {u.lastTime || ''}
+                              </span>
+                            </div>
                           </div>
 
                           <p className={`mt-3 text-sm font-semibold line-clamp-2 ${isSelected ? 'text-white' : 'text-slate-600'}`}>
@@ -788,7 +951,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   )}
                 </div>
 
-                <div className="flex-1 p-10 overflow-y-auto space-y-4 bg-white">
+                <div className="flex-1 p-6 md:p-10 overflow-y-auto space-y-4 bg-white">
                   {!selectedChatUserId ? (
                     <div className="h-full flex items-center justify-center text-slate-300 font-black uppercase text-xs">
                       Nenhuma conversa selecionada
@@ -801,7 +964,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     selectedConversation.map((msg) => (
                       <div key={msg.id} className={`flex ${msg.sender === 'ADMIN' ? 'justify-end' : 'justify-start'}`}>
                         <div
-                          className={`max-w-[80%] p-6 rounded-[2rem] text-sm leading-relaxed ${
+                          className={`max-w-[85%] p-5 md:p-6 rounded-[2rem] text-sm leading-relaxed break-words whitespace-pre-wrap ${
                             msg.sender === 'ADMIN'
                               ? 'bg-indigo-600 text-white rounded-tr-none shadow-lg'
                               : 'bg-slate-50 border border-slate-100 text-slate-800 rounded-tl-none font-semibold'
@@ -821,7 +984,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   )}
                 </div>
 
-                <div className="p-8 border-t border-slate-100 bg-white">
+                <div className="p-6 md:p-8 border-t border-slate-100 bg-white">
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -833,19 +996,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       onSendChatMessage(text, 'ADMIN', selectedChatUserId, selectedUserName);
                       setAdminChatInput('');
                     }}
-                    className="flex gap-4"
+                    className="flex gap-3 md:gap-4"
                   >
                     <input
                       value={adminChatInput}
                       onChange={(e) => setAdminChatInput(e.target.value)}
                       placeholder={selectedChatUserId ? 'Escreva a resposta do concierge…' : 'Selecione um usuário para responder'}
                       disabled={!selectedChatUserId}
-                      className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-8 py-5 text-sm font-bold outline-none focus:border-indigo-600 transition-all disabled:opacity-60"
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-6 md:px-8 py-4 md:py-5 text-sm font-bold outline-none focus:border-indigo-600 transition-all disabled:opacity-60"
                     />
                     <button
                       type="submit"
                       disabled={!selectedChatUserId}
-                      className="w-16 h-16 bg-slate-950 text-white rounded-full flex items-center justify-center text-xl shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-60 disabled:hover:scale-100"
+                      className="w-14 h-14 md:w-16 md:h-16 bg-slate-950 text-white rounded-full flex items-center justify-center text-xl shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-60 disabled:hover:scale-100"
                     >
                       ➔
                     </button>
@@ -880,7 +1043,68 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
-            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden">
+            {/* Mobile cards */}
+            <div className="md:hidden space-y-4">
+              {filteredUsers.length === 0 ? (
+                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-10 text-center text-slate-300 font-black uppercase text-xs">
+                  Nenhum assinante encontrado
+                </div>
+              ) : (
+                filteredUsers.map((u: any) => (
+                  <div key={u.id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-black text-slate-900">{u.name}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase">{u.email}</p>
+                        <p className="text-[10px] text-slate-400 font-mono mt-1">ID: {u.id}</p>
+                      </div>
+                      {renderPaymentBadge(u)}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                        {u.planName || '—'}
+                      </span>
+
+                      {Boolean(u.isBlocked) ? (
+                        <span className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-[9px] font-black uppercase">
+                          Bloqueado
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="flex gap-3 flex-wrap pt-2">
+                      <button
+                        onClick={() => {
+                          const isBlocked = Boolean(u.isBlocked);
+                          onUpdateUserStatus(u.id, !isBlocked);
+                        }}
+                        className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg transition-all ${
+                          Boolean(u.isBlocked)
+                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                            : 'bg-amber-500 text-white hover:bg-amber-600'
+                        }`}
+                      >
+                        {Boolean(u.isBlocked) ? 'Desbloquear' : 'Bloquear'}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const ok = confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
+                          if (ok) onDeleteUser(u.id);
+                        }}
+                        className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
@@ -934,9 +1158,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                           <button
                             onClick={() => {
-                              const ok = confirm(
-                                `Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`
-                              );
+                              const ok = confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
                               if (ok) onDeleteUser(u.id);
                             }}
                             className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
@@ -966,9 +1188,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="flex items-end justify-between gap-6 flex-wrap">
               <div>
                 <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Atendimentos Extras</h2>
-                <p className="text-slate-500 font-semibold text-sm mt-2">
-                  Pedidos registrados localmente (por enquanto, sem gateway).
-                </p>
+                <p className="text-slate-500 font-semibold text-sm mt-2">Pedidos registrados localmente (por enquanto, sem gateway).</p>
               </div>
 
               <div className="w-full md:w-[420px]">
@@ -1029,9 +1249,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <p className="font-bold text-slate-900">{o.userName}</p>
                           <p className="text-[10px] text-slate-400 font-mono mt-1">{o.userId}</p>
                           {o.userPlan ? (
-                            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mt-2">
-                              {o.userPlan}
-                            </p>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mt-2">{o.userPlan}</p>
                           ) : null}
                         </td>
 
@@ -1098,124 +1316,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
         )}
-
-        {activeTab === 'INTEGRATION' && (
-          <div className="animate-in slide-in-from-right-10 space-y-12">
-            <div className="bg-slate-900 rounded-[4rem] p-12 text-white shadow-2xl space-y-10">
-              <h2 className="text-2xl font-black uppercase tracking-widest text-indigo-400">
-                Webhook & Gateways de Pagamento
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                <div className="space-y-4">
-                  <label className="block text-[10px] font-black uppercase text-slate-500">
-                    Gateway em Operação
-                  </label>
-                  <select
-                    name="environment"
-                    value={(profile as any).environment}
-                    onChange={handleGatewayUpdate}
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
-                  >
-                    <option value="SANDBOX">Sandbox Mercado Pago (Testes)</option>
-                    <option value="PRODUCTION">Stripe Live (Produção)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-4">
-                  <label className="block text-[10px] font-black uppercase text-slate-500">
-                    URL de Webhook (Copiar para Gateway)
-                  </label>
-                  <div className="flex gap-4">
-                    <input
-                      readOnly
-                      value={`https://zeloo.cloud/api/webhooks/${branding.name.toLowerCase()}`}
-                      className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-xs font-mono text-indigo-300 outline-none"
-                    />
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(
-                          `https://zeloo.cloud/api/webhooks/${branding.name.toLowerCase()}`
-                        );
-                        alert('URL Copiada!');
-                      }}
-                      className="px-6 bg-indigo-600 rounded-2xl text-[9px] font-black uppercase"
-                    >
-                      Copiar
-                    </button>
-                  </div>
-                </div>
-
-                <div className="md:col-span-2 space-y-4">
-                  <label className="block text-[10px] font-black uppercase text-slate-500">
-                    Chave Pública do Banco (API Key)
-                  </label>
-                  <input
-                    name="publicKey"
-                    value={(profile as any).publicKey || ''}
-                    onChange={handleGatewayUpdate}
-                    placeholder="APP_USR-..."
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm font-bold outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-6 border-t border-white/10">
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`w-3 h-3 rounded-full ${(profile as any).publicKey ? 'bg-emerald-500' : 'bg-red-500'}`}
-                  ></span>
-                  <span className="text-[10px] font-black uppercase tracking-widest">
-                    {(profile as any).publicKey ? 'Integração Ativa' : 'Aguardando Credenciais'}
-                  </span>
-                </div>
-                <button
-                  onClick={() => alert('Configurações salvas!')}
-                  className="px-12 py-5 bg-white text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-105 transition-all"
-                >
-                  Salvar Alterações
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-[4rem] p-12 border border-slate-100 shadow-xl space-y-8">
-              <h2 className="text-2xl font-black text-slate-900 uppercase">Identidade Visual {branding.name}</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-black uppercase text-slate-400 ml-1">
-                    Nome do Aplicativo
-                  </label>
-                  <input
-                    name="name"
-                    value={branding.name}
-                    onChange={handleBrandingChange}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none focus:border-indigo-600 transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-black uppercase text-slate-400 ml-1">
-                    Slogan Principal
-                  </label>
-                  <input
-                    name="slogan"
-                    value={branding.slogan}
-                    onChange={handleBrandingChange}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none focus:border-indigo-600 transition-all"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
 
       {/* ✅ MODAL: Responder Chamado */}
       {replyModalOpen && (
         <div className="fixed inset-0 z-[220] flex items-center justify-center p-6">
-          <div
-            className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm animate-in fade-in"
-            onClick={() => setReplyModalOpen(false)}
-          />
-          <div className="relative bg-white rounded-[3rem] p-10 max-w-2xl w-full shadow-2xl animate-in zoom-in-95">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm animate-in fade-in" onClick={() => setReplyModalOpen(false)} />
+          <div className="relative bg-white rounded-[3rem] p-8 md:p-10 max-w-2xl w-full shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start justify-between gap-6 mb-8">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Responder chamado</p>
@@ -1223,18 +1330,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <p className="text-[10px] font-mono text-slate-400 mt-2">{replyTarget?.id || ''}</p>
               </div>
 
-              <button
-                onClick={() => setReplyModalOpen(false)}
-                className="text-slate-300 hover:text-slate-900 font-black text-3xl"
-                aria-label="Fechar"
-              >
+              <button onClick={() => setReplyModalOpen(false)} className="text-slate-300 hover:text-slate-900 font-black text-3xl" aria-label="Fechar">
                 ×
               </button>
             </div>
 
-            <label className="block text-[10px] font-black uppercase text-slate-400 ml-1 mb-2">
-              Mensagem para o cliente
-            </label>
+            <label className="block text-[10px] font-black uppercase text-slate-400 ml-1 mb-2">Mensagem para o cliente</label>
             <textarea
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
@@ -1259,7 +1360,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <p className="mt-6 text-[9px] font-black uppercase tracking-widest text-slate-400">
-              Isso envia a resposta e marca o chamado como analisado.
+              Isso envia a resposta e marca o chamado como AGENDADO.
             </p>
           </div>
         </div>
@@ -1268,11 +1369,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* ✅ MODAL: Concluir com Horas */}
       {hoursModalOpen && (
         <div className="fixed inset-0 z-[230] flex items-center justify-center p-6">
-          <div
-            className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm animate-in fade-in"
-            onClick={() => setHoursModalOpen(false)}
-          />
-          <div className="relative bg-white rounded-[3rem] p-10 max-w-xl w-full shadow-2xl animate-in zoom-in-95">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm animate-in fade-in" onClick={() => setHoursModalOpen(false)} />
+          <div className="relative bg-white rounded-[3rem] p-8 md:p-10 max-w-xl w-full shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start justify-between gap-6 mb-8">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Concluir atendimento</p>
@@ -1280,11 +1378,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <p className="text-[10px] font-mono text-slate-400 mt-2">{hoursTarget?.id || ''}</p>
               </div>
 
-              <button
-                onClick={() => setHoursModalOpen(false)}
-                className="text-slate-300 hover:text-slate-900 font-black text-3xl"
-                aria-label="Fechar"
-              >
+              <button onClick={() => setHoursModalOpen(false)} className="text-slate-300 hover:text-slate-900 font-black text-3xl" aria-label="Fechar">
                 ×
               </button>
             </div>
@@ -1301,9 +1395,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               placeholder="3"
             />
 
-            <p className="mt-4 text-[9px] font-black uppercase tracking-widest text-slate-400">
-              Dica: use ponto ou vírgula (ex.: 2,5).
-            </p>
+            <p className="mt-4 text-[9px] font-black uppercase tracking-widest text-slate-400">Dica: use ponto ou vírgula (ex.: 2,5).</p>
 
             <div className="mt-8 flex gap-3 flex-wrap justify-end">
               <button
@@ -1327,19 +1419,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {viewingProof && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-sm animate-in fade-in">
           <div className="absolute inset-0" onClick={() => setViewingProof(null)}></div>
-          <div className="relative bg-white rounded-[4rem] p-12 max-w-2xl w-full shadow-2xl animate-in zoom-in-95">
+          <div className="relative bg-white rounded-[4rem] p-10 md:p-12 max-w-2xl w-full shadow-2xl animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-8">
               <h3 className="text-2xl font-black uppercase">Comprovante Pix</h3>
-              <button onClick={() => setViewingProof(null)} className="text-slate-400 font-black text-3xl">×</button>
+              <button onClick={() => setViewingProof(null)} className="text-slate-400 font-black text-3xl">
+                ×
+              </button>
             </div>
-            <img
-              src={viewingProof}
-              className="w-full max-h-[500px] object-contain mb-8 rounded-3xl"
-              alt="Pix Proof"
-            />
+            <img src={viewingProof} className="w-full max-h-[500px] object-contain mb-8 rounded-3xl" alt="Pix Proof" />
             <button
               onClick={() => {
-                const user = users.find((u: any) => u.paymentProofUrl === viewingProof);
+                const user = (users || []).find((u: any) => u.paymentProofUrl === viewingProof);
                 if (user) onHandlePaymentAction(user.id, 'APPROVE');
                 setViewingProof(null);
               }}
