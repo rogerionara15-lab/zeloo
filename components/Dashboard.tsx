@@ -218,33 +218,45 @@ const Dashboard: React.FC<DashboardProps> = ({
       const quantity = Number(extraQty || 1);
 
       const resp = await fetch('/api/extras', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          quantity, // quantos atendimentos extras
-          price: unitPrice, // preço unitário
-          title: `Zeloo - Atendimentos extras (${quantity}x)`,
-        }),
-      });
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email,
+    quantity, // quantos atendimentos extras
+    price: unitPrice, // preco unitário
+    title: `Zeloo - Atendimentos extras (${quantity}x)`,
+  }),
+});
 
-      if (!resp.ok) {
-        const errorText = await resp.text();
-        console.error('Erro no /api/extras:', errorText);
-        alert('Falha ao iniciar pagamento de extras. Tente novamente.');
-        return;
-      }
+// ✅ sempre tenta ler JSON
+const data = await resp.json().catch(() => ({}));
 
-      const json = await resp.json();
+if (!resp.ok) {
+  console.error('Erro no /api/extras:', resp.status, data);
+  alert(
+    `Falha ao iniciar pagamento de extras. (status ${resp.status})` +
+      (data?.error ? `\nMotivo: ${data.error}` : '')
+  );
+  return;
+}
 
-      if (!json?.ok || !json?.init_point) {
-        console.error('Checkout extras error:', json);
-        alert(json?.error || 'Falha ao iniciar pagamento de extras.');
-        return;
-      }
+const initPoint =
+  data?.init_point || data?.initPoint || data?.url || data?.checkout_url;
+
+if (!initPoint) {
+  console.error('Resposta sem init_point:', data);
+  alert('Falha ao iniciar pagamento de extras. Resposta inválida do servidor.');
+  return;
+}
+
+setShowExtraModal(false);
+window.location.href = initPoint;
+
+
 
       setShowExtraModal(false);
-      window.location.href = json.init_point;
+      window.location.href = initPoint;
+
     } catch (err: any) {
       console.error('Erro inesperado (extras):', err);
       alert(err?.message || 'Falha ao iniciar pagamento de extras.');
