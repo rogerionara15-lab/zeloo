@@ -707,45 +707,40 @@ const App: React.FC = () => {
                     chatMessages={chatMessages.filter((m) => (m as any).userId === currentUserLive.id)}
                     onSendChatMessage={handleSendChatMessage}
                     onAddRequest={async (d, u) => {
-                      if (!currentUserLive) return;
+  if (!currentUserLive) return;
 
-                      const id = makeId();
-                      const nowIso = new Date().toISOString();
+  // ✅ 1) NÃO cria id no front
+  // ✅ 2) salva direto no Supabase e pega o registro real de volta
 
-                      const newReq: MaintenanceRequest = {
-                        id,
-                        userId: currentUserLive.id,
-                        userName: (currentUserLive as any).name,
-                        description: d,
-                        isUrgent: u,
-                        status: ServiceStatus.PENDING,
-                        createdAt: new Date().toLocaleDateString('pt-BR'),
-                        visitCost: 0,
-                        archived: false,
-                      } as any;
+  const { data, error } = await supabase
+    .from('requests')
+    .insert([
+      {
+        // ✅ NÃO mande "id"
+        user_id: currentUserLive.id,
+        user_name: (currentUserLive as any).name,
+        description: d,
+        is_urgent: Boolean(u),
+        status: ServiceStatus.PENDING,
+        visit_cost: 0,
+        archived: false,
+        // created_at o Supabase já preenche sozinho
+      },
+    ])
+    .select('*')
+    .single();
 
-                      // UI imediata
-                      setMaintenanceRequests((prev) => [newReq, ...prev]);
+  if (error) {
+    console.error('❌ Falha ao salvar chamado no Supabase:', error);
+    alert(`Falha ao salvar chamado:\n${error.message}`);
+    return;
+  }
 
-                      // grava no supabase
-                      try {
-                        await supabase.from('requests').insert([
-                          {
-                            id: newReq.id,
-                            user_id: newReq.userId,
-                            user_name: newReq.userName,
-                            description: newReq.description,
-                            is_urgent: Boolean((newReq as any).isUrgent),
-                            status: newReq.status,
-                            visit_cost: Number((newReq as any).visitCost ?? 0),
-                            archived: Boolean((newReq as any).archived ?? false),
-                            created_at: nowIso,
-                          },
-                        ]);
-                      } catch (e) {
-                        console.warn('Falha ao salvar OS no Supabase:', e);
-                      }
-                    }}
+  // ✅ Agora sim adiciona na tela, já com o id correto vindo do Supabase
+  const mapped = mapRequestRowToRequest(data);
+  setMaintenanceRequests((prev) => [mapped, ...prev]);
+}}
+
                     onGoHome={() => setView('LANDING')}
                     onApproveVisitCost={async (rid) => {
                       setMaintenanceRequests((p) =>
