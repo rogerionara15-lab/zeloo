@@ -610,6 +610,10 @@ const App: React.FC = () => {
     !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
 
   const pathname = window.location.pathname;
+  if (pathname === '/pos-extra') {
+  return <PosExtra supabase={supabase} />;
+}
+
 // /pos-extra?email=...&qtd=1 -> adiciona créditos no Supabase e volta pra home
 if (pathname === '/pos-extra') {
   return <PosExtra supabase={supabase} />;

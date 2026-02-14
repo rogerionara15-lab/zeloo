@@ -36,9 +36,18 @@ export default async function handler(req: any, res: any) {
     const proto = req.headers?.['x-forwarded-proto'] || 'https';
     const baseUrl = host ? `${proto}://${host}` : '';
 
-    const successUrl = baseUrl ? `${baseUrl}/dashboard?extra=success` : undefined;
-    const failureUrl = baseUrl ? `${baseUrl}/dashboard?extra=failure` : undefined;
-    const pendingUrl = baseUrl ? `${baseUrl}/dashboard?extra=pending` : undefined;
+    const successUrl = baseUrl
+  ? `${baseUrl}/pos-extra?email=${encodeURIComponent(email)}&qtd=${encodeURIComponent(String(qty))}`
+  : undefined;
+
+const failureUrl = baseUrl
+  ? `${baseUrl}/pos-extra?status=failure&email=${encodeURIComponent(email)}&qtd=${encodeURIComponent(String(qty))}`
+  : undefined;
+
+const pendingUrl = baseUrl
+  ? `${baseUrl}/pos-extra?status=pending&email=${encodeURIComponent(email)}&qtd=${encodeURIComponent(String(qty))}`
+  : undefined;
+
 
     const preferencePayload: any = {
       items: [
@@ -56,7 +65,8 @@ export default async function handler(req: any, res: any) {
         pending: pendingUrl,
       },
       auto_return: 'approved',
-      external_reference: `extras:${email}:${Date.now()}`,
+      external_reference: `extras:${email}:${qty}:${Date.now()}`,
+
     };
 
     if (!baseUrl) {
@@ -91,7 +101,17 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    return res.status(200).json({ init_point: initPoint });
+    return res.status(200).json({
+  init_point: initPoint,
+  debug: {
+    success: preferencePayload?.back_urls?.success,
+    failure: preferencePayload?.back_urls?.failure,
+    pending: preferencePayload?.back_urls?.pending,
+    external_reference: preferencePayload?.external_reference,
+    baseUrl,
+  },
+});
+
   } catch (err: any) {
     return res.status(500).json({
       error: 'Internal Server Error',
