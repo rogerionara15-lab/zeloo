@@ -121,26 +121,35 @@ const Dashboard: React.FC<DashboardProps> = ({
     window.open(url, '_blank');
   };
 
+  // ✅ Extras do usuário (vem do App mapeado: extra_visits_purchased -> extraVisitsPurchased)
+  const extrasAvailable = useMemo(() => {
+    const v = Number((userData as any)?.extraVisitsPurchased || 0);
+    return Number.isFinite(v) ? v : 0;
+  }, [userData]);
+
   const quota = useMemo(() => {
     const plan = userData?.planName || '';
 
     // padrão residencial: 2 atendimentos (3h cada) = 6h/mês
     let totalHours = 6;
-    let totalAppointments = 2;
+    let totalAppointmentsPlan = 2;
 
     // comercial: 4 atendimentos (3h cada) = 12h/mês
     if (plan.includes('Comercial')) {
       totalHours = 12;
-      totalAppointments = 4;
+      totalAppointmentsPlan = 4;
     }
 
     // condomínio: sob contrato (por enquanto 0 aqui)
     if (plan.includes('Condomínio')) {
       totalHours = 0;
-      totalAppointments = 0;
+      totalAppointmentsPlan = 0;
     }
 
-    // Só CONCLUÍDOS do mês atual contam
+    // ✅ SOMA EXTRAS ao total de atendimentos
+    const totalAppointments = totalAppointmentsPlan + extrasAvailable;
+
+    // Só CONCLUÍDOS do mês atual contam (mantém compatível com seu formato atual)
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
 
@@ -165,11 +174,13 @@ const Dashboard: React.FC<DashboardProps> = ({
       totalHours,
       usedHours,
       remainingHours,
+      totalAppointmentsPlan,
       totalAppointments,
       usedAppointments,
       remainingAppointments,
+      extrasAvailable,
     };
-  }, [userData, requests]);
+  }, [userData, requests, extrasAvailable]);
 
   const usagePerc = useMemo(() => {
     if (!quota.totalHours || quota.totalHours <= 0) return 0;
@@ -218,36 +229,30 @@ const Dashboard: React.FC<DashboardProps> = ({
       const quantity = Number(extraQty || 1);
 
       const resp = await fetch('/api/extras', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email,
-    quantity,
-    price: unitPrice,
-    title: `Zeloo - Atendimentos extras (${quantity}x)`,
-  }),
-});
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          quantity,
+          price: unitPrice,
+          title: `Zeloo - Atendimentos extras (${quantity}x)`,
+        }),
+      });
 
-const data = await resp.json();
+      const data = await resp.json();
 
-if (!resp.ok) {
-  console.error('Extras error:', data);
-  throw new Error(data?.error || 'Falha ao iniciar pagamento de extras');
-}
+      if (!resp.ok) {
+        console.error('Extras error:', data);
+        throw new Error(data?.error || 'Falha ao iniciar pagamento de extras');
+      }
 
-const initPoint = data?.init_point;
-if (!initPoint) {
-  throw new Error('init_point não retornou do servidor');
-}
-
-window.location.href = initPoint;
-
-
-
+      const initPoint = data?.init_point;
+      if (!initPoint) {
+        throw new Error('init_point não retornou do servidor');
+      }
 
       setShowExtraModal(false);
       window.location.href = initPoint;
-
     } catch (err: any) {
       console.error('Erro inesperado (extras):', err);
       alert(err?.message || 'Falha ao iniciar pagamento de extras.');
@@ -292,6 +297,24 @@ window.location.href = initPoint;
     return 'bg-slate-100 text-slate-700';
   };
 
+  // ✅ Gate: se não tem atendimentos, não abre chamado e manda comprar extra
+  const ensureCanOpenRequest = () => {
+    // condomínio: se totalAppointmentsPlan=0, você pode mudar essa regra depois
+    if ((userData.planName || '').includes('Condomínio') && quota.totalAppointmentsPlan === 0) {
+      alert('Seu plano é sob consulta. Fale com o suporte para liberar seu pacote.');
+      return false;
+    }
+
+    if (quota.remainingAppointments <= 0) {
+      alert('Você zerou seus atendimentos do mês. Para continuar, compre atendimentos extras.');
+      setExtraQty(1);
+      setShowExtraModal(true);
+      return false;
+    }
+
+    return true;
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#F8FAFC]">
       {/* SIDEBAR */}
@@ -311,6 +334,9 @@ window.location.href = initPoint;
           <p className="text-sm font-black text-white">{userData.planName}</p>
           <div className="mt-3 text-[10px] font-bold text-slate-300">
             {quota.remainingHours.toFixed(1)}h restantes • {quota.remainingAppointments} atendimentos
+          </div>
+          <div className="mt-2 text-[10px] font-bold text-emerald-300">
+            Extras disponíveis: {quota.extrasAvailable}
           </div>
         </div>
 
@@ -366,7 +392,10 @@ window.location.href = initPoint;
               </div>
 
               <button
-                onClick={() => setShowModal(true)}
+                onClick={() => {
+                  if (!ensureCanOpenRequest()) return;
+                  setShowModal(true);
+                }}
                 className="px-10 py-5 bg-slate-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-2xl hover:bg-indigo-600 transition-all active:scale-95"
               >
                 + Abrir Chamado
@@ -381,6 +410,9 @@ window.location.href = initPoint;
                     <h3 className="text-2xl font-black text-slate-950 mt-2">Horas Técnicas</h3>
                     <p className="text-sm text-slate-500 font-semibold mt-2">
                       Restam <span className="font-black">{quota.remainingHours.toFixed(1)}h</span> este mês
+                    </p>
+                    <p className="text-xs text-emerald-600 font-black mt-3">
+                      Extras disponíveis: {quota.extrasAvailable}
                     </p>
                   </div>
 
@@ -481,7 +513,10 @@ window.location.href = initPoint;
                 </div>
 
                 <button
-                  onClick={() => setShowModal(true)}
+                  onClick={() => {
+                    if (!ensureCanOpenRequest()) return;
+                    setShowModal(true);
+                  }}
                   className="px-8 py-4 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
                 >
                   + Novo chamado
@@ -587,7 +622,10 @@ window.location.href = initPoint;
               </div>
 
               <button
-                onClick={() => setShowModal(true)}
+                onClick={() => {
+                  if (!ensureCanOpenRequest()) return;
+                  setShowModal(true);
+                }}
                 className="px-6 py-3 bg-slate-950 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
               >
                 + Abrir chamado
@@ -673,6 +711,10 @@ window.location.href = initPoint;
                     {quota.usedHours.toFixed(1)}h usadas de {quota.totalHours}h
                   </div>
                   <div className="text-sm font-bold text-slate-600">{quota.remainingAppointments} atendimentos restantes</div>
+                </div>
+
+                <div className="mt-2 text-xs font-black text-emerald-600">
+                  Extras disponíveis: {quota.extrasAvailable}
                 </div>
               </div>
 
@@ -852,6 +894,7 @@ window.location.href = initPoint;
               <div className="flex items-center gap-4">
                 <button
                   onClick={() => {
+                    if (!ensureCanOpenRequest()) return;
                     if (!newReq.desc.trim()) return alert('Descreva o problema primeiro.');
                     onAddRequest(newReq.desc, true);
                     setShowModal(false);
@@ -865,6 +908,7 @@ window.location.href = initPoint;
 
                 <button
                   onClick={() => {
+                    if (!ensureCanOpenRequest()) return;
                     if (!newReq.desc.trim()) return alert('Descreva o problema primeiro.');
                     onAddRequest(newReq.desc, false);
                     setShowModal(false);
