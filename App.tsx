@@ -62,7 +62,7 @@ const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ✅ ID sempre UUID (sem fallback "id-123" que quebra colunas uuid)
 const makeUuid = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function') return (crypto as any).randomUUID();
 
   // fallback v4 (raríssimo hoje, mas garante UUID válido)
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -126,7 +126,9 @@ const mapUserRowToUser = (row: any): UserRegistration => {
     planName: row.plan_name ?? row.planName ?? '',
     paymentStatus: row.payment_status ?? row.paymentStatus ?? 'PENDING',
     isBlocked: Boolean(row.is_blocked ?? row.isBlocked ?? false),
-    date: row.created_at ? new Date(row.created_at).toLocaleDateString('pt-BR') : (row.date ?? new Date().toLocaleDateString('pt-BR')),
+    date: row.created_at
+      ? new Date(row.created_at).toLocaleDateString('pt-BR')
+      : (row.date ?? new Date().toLocaleDateString('pt-BR')),
     dueDate: row.due_date ?? row.dueDate ?? 'Ativo',
     extraVisitsPurchased: row.extra_visits_purchased ?? row.extraVisitsPurchased ?? 0,
 
@@ -164,11 +166,15 @@ const replaceUrl = (path: string) => {
     window.history.replaceState({}, '', path);
   } catch {}
 };
-const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
-  const [status, setStatus] = React.useState<'LOADING' | 'OK' | 'FAIL'>('LOADING');
-  const [message, setMessage] = React.useState<string>('Processando seu atendimento extra...');
 
-  React.useEffect(() => {
+// ----------------------
+// ✅ POS-EXTRA (CORRIGIDO)
+// ----------------------
+const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
+  const [status, setStatus] = useState<'LOADING' | 'OK' | 'FAIL'>('LOADING');
+  const [message, setMessage] = useState<string>('Processando seu atendimento extra...');
+
+  useEffect(() => {
     const run = async () => {
       try {
         const params = new URLSearchParams(window.location.search);
@@ -202,7 +208,7 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
 
         if (uErr || !user) {
           setStatus('FAIL');
-          setMessage('Não encontrei seu usuário no sistema. Fale com o suporte.');
+          setMessage(`Não encontrei seu usuário (email: ${email}). Fale com o suporte.`);
           return;
         }
 
@@ -225,10 +231,10 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
         setStatus('OK');
         setMessage(`✅ Crédito liberado! Você recebeu +${add} atendimento(s) extra(s).`);
 
-        // 3) voltar pra home
+        // 3) voltar pra home SEM RELOAD
         setTimeout(() => {
-          window.location.href = '/';
-        }, 1200);
+          replaceUrl('/');
+        }, 900);
       } catch (e) {
         setStatus('FAIL');
         setMessage('Erro inesperado ao liberar extra.');
@@ -247,7 +253,7 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
         {status !== 'LOADING' && (
           <button
             className="mt-6 w-full py-3 rounded-xl bg-indigo-500 text-white font-black"
-            onClick={() => (window.location.href = '/')}
+            onClick={() => replaceUrl('/')}
           >
             Voltar
           </button>
@@ -274,16 +280,8 @@ const App: React.FC = () => {
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
+  // ✅ REMOVIDO: Plano Teste (R$ 1)
   const [availablePlans] = useState<PlanDetails[]>([
-    {
-      name: 'Plano Teste (R$ 1)',
-      tier: 'Mensal',
-      price: 'R$ 1',
-      period: '/mês',
-      features: ['Teste do pagamento', 'Verificação do webhook', 'Liberação automática (teste)'],
-      highlight: false,
-      save: 'Plano temporário para teste',
-    },
     {
       name: 'Central Essencial Residencial',
       tier: 'Mensal',
@@ -609,15 +607,15 @@ const App: React.FC = () => {
   const canAccessDashboard =
     !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
 
+  // ----------------------
+  // ✅ PORTEIRO DE URL (rotas sem router)
+  // ----------------------
   const pathname = window.location.pathname;
-  if (pathname === '/pos-extra') {
-  return <PosExtra supabase={supabase} />;
-}
 
-// /pos-extra?email=...&qtd=1 -> adiciona créditos no Supabase e volta pra home
-if (pathname === '/pos-extra') {
-  return <PosExtra supabase={supabase} />;
-}
+  // /pos-extra
+  if (pathname === '/pos-extra') {
+    return <PosExtra supabase={supabase} />;
+  }
 
   // /pos-pagamento
   if (pathname === '/pos-pagamento') {
@@ -643,12 +641,10 @@ if (pathname === '/pos-extra') {
     return (
       <CreateAccount
         onFinalize={async (creds) => {
-          // ✅ NÃO cria usuário local antes de salvar no Supabase
           const payload = {
             name: (pendingRegistration?.name ?? '') as string,
             email: creds.email,
             password_hash: creds.password,
-
             plan_name: (pendingRegistration?.planName ?? '') as string,
             payment_status: 'PAID',
             is_blocked: false,
@@ -665,12 +661,10 @@ if (pathname === '/pos-extra') {
 
           const savedUser = mapUserRowToUser(data);
 
-          // atualiza estado com o usuário REAL (uuid do Supabase)
           setRegisteredUsers((prev) => [savedUser, ...prev]);
           setCurrentUser(savedUser);
           setView('DASHBOARD');
 
-          // volta pra "/" sem reload (mantém estado)
           replaceUrl('/');
         }}
         onCancel={() => {
@@ -680,7 +674,9 @@ if (pathname === '/pos-extra') {
     );
   }
 
-  // app principal
+  // ----------------------
+  // ✅ APP PRINCIPAL (views)
+  // ----------------------
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 selection:bg-indigo-600 selection:text-white">
       {view === 'LANDING' && <Header onOpenLogin={() => setShowLoginModal(true)} />}
@@ -933,12 +929,10 @@ if (pathname === '/pos-extra') {
               {view === 'CREATE_ACCOUNT' && (
                 <CreateAccount
                   onFinalize={async (creds) => {
-                    // ✅ NÃO cria usuário local antes de salvar no Supabase
                     const payload = {
                       name: (pendingRegistration?.name ?? '') as string,
                       email: creds.email,
                       password_hash: creds.password,
-
                       plan_name: (pendingRegistration?.planName ?? '') as string,
                       payment_status: (pendingRegistration?.paymentStatus ?? 'PENDING') as any,
                       is_blocked: false,
