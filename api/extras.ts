@@ -1,10 +1,7 @@
-
-
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
-    
-
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   try {
@@ -35,13 +32,29 @@ export default async function handler(req: any, res: any) {
         ? title.trim()
         : `Zeloo - Atendimentos extras (${qty}x)`;
 
+    // ✅ Detecta baseUrl na Vercel (funciona em produção)
     const host = req.headers?.['x-forwarded-host'] || req.headers?.host;
     const proto = req.headers?.['x-forwarded-proto'] || 'https';
     const baseUrl = host ? `${proto}://${host}` : '';
 
-    const successUrl = baseUrl ? `${baseUrl}/dashboard?extra=success` : undefined;
-    const failureUrl = baseUrl ? `${baseUrl}/dashboard?extra=failure` : undefined;
-    const pendingUrl = baseUrl ? `${baseUrl}/dashboard?extra=pending` : undefined;
+    // ✅ Volta para /pos-extra (se o MP redirecionar)
+    const successUrl = baseUrl
+      ? `${baseUrl}/pos-extra?email=${encodeURIComponent(email)}&qtd=${encodeURIComponent(String(qty))}`
+      : undefined;
+
+    const failureUrl = baseUrl
+      ? `${baseUrl}/pos-extra?status=failure&email=${encodeURIComponent(email)}&qtd=${encodeURIComponent(String(qty))}`
+      : undefined;
+
+    const pendingUrl = baseUrl
+      ? `${baseUrl}/pos-extra?status=pending&email=${encodeURIComponent(email)}&qtd=${encodeURIComponent(String(qty))}`
+      : undefined;
+
+    // ✅ Webhook (SOLUÇÃO REAL para PIX):
+    // mesmo se o usuário não voltar pro site, o MP chama esse endpoint e o extra cai no Supabase.
+    const notificationUrl = baseUrl ? `${baseUrl}/api/mp-webhook-extras` : undefined;
+
+    const externalReference = `extras:${email}:${qty}:${Date.now()}`;
 
     const preferencePayload: any = {
       items: [
@@ -59,12 +72,15 @@ export default async function handler(req: any, res: any) {
         pending: pendingUrl,
       },
       auto_return: 'approved',
-      external_reference: `extras:${email}:${Date.now()}`,
+      external_reference: externalReference,
+      notification_url: notificationUrl,
     };
 
+    // Se não conseguiu montar baseUrl (ex: ambiente estranho), remove URLs
     if (!baseUrl) {
       delete preferencePayload.back_urls;
       delete preferencePayload.auto_return;
+      delete preferencePayload.notification_url;
     }
 
     const mpResp = await fetch('https://api.mercadopago.com/checkout/preferences', {
@@ -94,7 +110,17 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    return res.status(200).json({ init_point: initPoint });
+    return res.status(200).json({
+      init_point: initPoint,
+      debug: {
+        success: preferencePayload?.back_urls?.success,
+        failure: preferencePayload?.back_urls?.failure,
+        pending: preferencePayload?.back_urls?.pending,
+        notification_url: preferencePayload?.notification_url,
+        external_reference: preferencePayload?.external_reference,
+        baseUrl,
+      },
+    });
   } catch (err: any) {
     return res.status(500).json({
       error: 'Internal Server Error',
