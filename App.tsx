@@ -164,6 +164,98 @@ const replaceUrl = (path: string) => {
     window.history.replaceState({}, '', path);
   } catch {}
 };
+const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
+  const [status, setStatus] = React.useState<'LOADING' | 'OK' | 'FAIL'>('LOADING');
+  const [message, setMessage] = React.useState<string>('Processando seu atendimento extra...');
+
+  React.useEffect(() => {
+    const run = async () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const email = params.get('email') || '';
+        const qtd = Number(params.get('qtd') || '1');
+        const st = params.get('status'); // failure/pending etc.
+
+        if (st === 'failure') {
+          setStatus('FAIL');
+          setMessage('Pagamento não concluído (falha). Tente novamente.');
+          return;
+        }
+        if (st === 'pending') {
+          setStatus('FAIL');
+          setMessage('Pagamento pendente. Assim que aprovar, o crédito cai automaticamente.');
+          return;
+        }
+
+        if (!email) {
+          setStatus('FAIL');
+          setMessage('Email ausente no retorno do pagamento. Fale com o suporte.');
+          return;
+        }
+
+        // 1) buscar usuário pelo email
+        const { data: user, error: uErr } = await supabase
+          .from('users')
+          .select('id, extra_visits_purchased')
+          .eq('email', email)
+          .single();
+
+        if (uErr || !user) {
+          setStatus('FAIL');
+          setMessage('Não encontrei seu usuário no sistema. Fale com o suporte.');
+          return;
+        }
+
+        const current = Number(user.extra_visits_purchased || 0);
+        const add = Number.isFinite(qtd) ? qtd : 1;
+        const next = current + add;
+
+        // 2) atualizar créditos
+        const { error: upErr } = await supabase
+          .from('users')
+          .update({ extra_visits_purchased: next })
+          .eq('id', user.id);
+
+        if (upErr) {
+          setStatus('FAIL');
+          setMessage('Falha ao liberar seu crédito. Fale com o suporte.');
+          return;
+        }
+
+        setStatus('OK');
+        setMessage(`✅ Crédito liberado! Você recebeu +${add} atendimento(s) extra(s).`);
+
+        // 3) voltar pra home
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 1200);
+      } catch (e) {
+        setStatus('FAIL');
+        setMessage('Erro inesperado ao liberar extra.');
+      }
+    };
+
+    run();
+  }, [supabase]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white p-8">
+      <div className="max-w-md w-full bg-white/5 rounded-2xl p-6 border border-white/10">
+        <div className="text-2xl font-black">Zeloo</div>
+        <div className="mt-3 text-sm text-white/80">{message}</div>
+
+        {status !== 'LOADING' && (
+          <button
+            className="mt-6 w-full py-3 rounded-xl bg-indigo-500 text-white font-black"
+            onClick={() => (window.location.href = '/')}
+          >
+            Voltar
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const App: React.FC = () => {
   const [view, setView] = useState<string>('LANDING');
@@ -518,6 +610,10 @@ const App: React.FC = () => {
     !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
 
   const pathname = window.location.pathname;
+// /pos-extra?email=...&qtd=1 -> adiciona créditos no Supabase e volta pra home
+if (pathname === '/pos-extra') {
+  return <PosExtra supabase={supabase} />;
+}
 
   // /pos-pagamento
   if (pathname === '/pos-pagamento') {
