@@ -73,6 +73,48 @@ const makeUuid = () => {
 };
 
 // ----------------------
+// ✅ HELPERS: Plano / Limite Mensal + Mês Atual por ISO
+// ----------------------
+const getPlanMonthlyLimit = (planName?: string) => {
+  const name = (planName || '').toLowerCase();
+
+  // Ajustado conforme seus nomes reais
+  if (name.includes('residencial')) return 2;
+  if (name.includes('comercial')) return 4;
+
+  // "Sob consulta" — você pode mudar para um número se quiser liberar
+  if (name.includes('condom')) return 0;
+
+  // fallback seguro
+  return 0;
+};
+
+const getMonthRange = (d = new Date()) => {
+  const start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0, 0);
+  return { startISO: start.toISOString(), endISO: end.toISOString() };
+};
+
+const getUsedRequestsThisMonth = async (userId: string) => {
+  const { startISO, endISO } = getMonthRange(new Date());
+
+  const { count, error } = await supabase
+    .from('requests')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('created_at', startISO)
+    .lt('created_at', endISO);
+
+  if (error) {
+    console.error('getUsedRequestsThisMonth error:', error);
+    // conservador: se não conseguir contar, bloqueia para não liberar errado
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return count || 0;
+};
+
+// ----------------------
 // MAPPERS (Supabase <-> Types)
 // ----------------------
 const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
@@ -160,15 +202,21 @@ const saveToLocal = (key: string, data: any) => {
   } catch {}
 };
 
-// ✅ troca URL sem recarregar (não perde estado)
+// ----------------------
+// ✅ MINI ROUTER: troca URL sem recarregar + força re-render
+// ----------------------
 const replaceUrl = (path: string) => {
   try {
     window.history.replaceState({}, '', path);
+    // força o App a "perceber" a mudança
+    window.dispatchEvent(new PopStateEvent('popstate'));
   } catch {}
 };
 
 // ----------------------
 // ✅ POS-EXTRA (CORRIGIDO)
+// - agora aceita email/qtd via query OU external_reference (extras:email:qtd:timestamp)
+// - e ao final volta pro App (re-render garantido pelo replaceUrl)
 // ----------------------
 const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
   const [status, setStatus] = useState<'LOADING' | 'OK' | 'FAIL'>('LOADING');
@@ -178,10 +226,8 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
     const run = async () => {
       try {
         const params = new URLSearchParams(window.location.search);
-        const email = params.get('email') || '';
-        const qtd = Number(params.get('qtd') || '1');
-        const st = params.get('status'); // failure/pending etc.
 
+        const st = params.get('status'); // failure/pending etc.
         if (st === 'failure') {
           setStatus('FAIL');
           setMessage('Pagamento não concluído (falha). Tente novamente.');
@@ -193,13 +239,36 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
           return;
         }
 
+        // 1) tenta pegar email/qtd direto
+        let email = params.get('email') || '';
+        let qtd = Number(params.get('qtd') || '1');
+
+        // 2) fallback: tenta external_reference
+        const ext =
+          params.get('external_reference') ||
+          params.get('externalReference') ||
+          params.get('reference') ||
+          '';
+
+        if ((!email || !Number.isFinite(qtd)) && ext.startsWith('extras:')) {
+          // formato: extras:email:qtd:timestamp
+          const parts = ext.split(':');
+          if (parts.length >= 3) {
+            email = email || parts[1] || '';
+            const parsedQtd = Number(parts[2] || '1');
+            if (Number.isFinite(parsedQtd)) qtd = parsedQtd;
+          }
+        }
+
+        if (!Number.isFinite(qtd) || qtd <= 0) qtd = 1;
+
         if (!email) {
           setStatus('FAIL');
           setMessage('Email ausente no retorno do pagamento. Fale com o suporte.');
           return;
         }
 
-        // 1) buscar usuário pelo email
+        // 3) buscar usuário pelo email
         const { data: user, error: uErr } = await supabase
           .from('users')
           .select('id, extra_visits_purchased')
@@ -216,7 +285,7 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
         const add = Number.isFinite(qtd) ? qtd : 1;
         const next = current + add;
 
-        // 2) atualizar créditos
+        // 4) atualizar créditos
         const { error: upErr } = await supabase
           .from('users')
           .update({ extra_visits_purchased: next })
@@ -231,7 +300,7 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
         setStatus('OK');
         setMessage(`✅ Crédito liberado! Você recebeu +${add} atendimento(s) extra(s).`);
 
-        // 3) voltar pra home SEM RELOAD
+        // 5) volta pro app (sem reload, mas com re-render)
         setTimeout(() => {
           replaceUrl('/');
         }, 900);
@@ -279,6 +348,15 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserRegistration | null>(null);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+
+  // ✅ mini-router: path reativo
+  const [path, setPath] = useState<string>(() => window.location.pathname);
+
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // ✅ REMOVIDO: Plano Teste (R$ 1)
   const [availablePlans] = useState<PlanDetails[]>([
@@ -425,6 +503,13 @@ const App: React.FC = () => {
           }
           return [mapped, ...prev];
         });
+
+        // ✅ CRÍTICO: se o usuário atualizado for o logado, atualiza currentUser também
+        setCurrentUser((prev) => {
+          if (!prev?.id) return prev;
+          if (prev.id !== mapped.id) return prev;
+          return { ...prev, ...mapped };
+        });
       });
 
     ch.subscribe();
@@ -432,6 +517,14 @@ const App: React.FC = () => {
       supabase.removeChannel(ch);
     };
   }, []);
+
+  // ✅ sync extra: se registeredUsers mudar, garante que currentUser acompanha
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const fresh = registeredUsers.find((u) => u.id === currentUser.id);
+    if (!fresh) return;
+    setCurrentUser((prev) => (prev ? ({ ...prev, ...fresh } as any) : prev));
+  }, [registeredUsers, currentUser?.id]);
 
   // cache local só branding/admin
   useEffect(() => {
@@ -610,15 +703,12 @@ const App: React.FC = () => {
   // ----------------------
   // ✅ PORTEIRO DE URL (rotas sem router)
   // ----------------------
-  const pathname = window.location.pathname;
-
-  // /pos-extra
-  if (pathname === '/pos-extra') {
+  // (agora usa `path` reativo)
+  if (path === '/pos-extra') {
     return <PosExtra supabase={supabase} />;
   }
 
-  // /pos-pagamento
-  if (pathname === '/pos-pagamento') {
+  if (path === '/pos-pagamento') {
     return (
       <PosPagamento
         onBack={() => {
@@ -636,8 +726,7 @@ const App: React.FC = () => {
     );
   }
 
-  // /criar-conta
-  if (pathname === '/criar-conta') {
+  if (path === '/criar-conta') {
     return (
       <CreateAccount
         onFinalize={async (creds) => {
@@ -774,17 +863,49 @@ const App: React.FC = () => {
                     onAddRequest={async (d, u) => {
                       if (!currentUserLive) return;
 
+                      // ✅ BLOQUEIO REAL: checa limite do mês ANTES de inserir
+                      const planLimit = getPlanMonthlyLimit((currentUserLive as any).planName);
+                      const extras = Number((currentUserLive as any).extraVisitsPurchased || 0);
+                      const totalLimit = planLimit + extras;
+
+                      // se plano não dá direito a chamados (ex: condomínio sob consulta)
+                      if (totalLimit <= 0) {
+                        alert(
+                          `Seu plano atual não possui atendimentos automáticos.\n\n` +
+                          `Entre em contato com o suporte para liberar seu pacote.`
+                        );
+                        return;
+                      }
+
+                      const used = await getUsedRequestsThisMonth((currentUserLive as any).id);
+
+                      if (used >= totalLimit) {
+                        alert(
+                          `Você atingiu o limite do mês.\n\n` +
+                          `Plano: ${planLimit}\n` +
+                          `Extras: ${extras}\n` +
+                          `Usados este mês: ${used}\n\n` +
+                          `Para continuar, compre atendimentos extras.`
+                        );
+
+                        // mantém no dashboard (onde normalmente existe o botão/componente de compra)
+                        // se você tiver uma rota própria pra compra, troque aqui:
+                        // replaceUrl('/comprar-extras');
+                        return;
+                      }
+
                       const { data, error } = await supabase
                         .from('requests')
                         .insert([
                           {
-                            user_id: currentUserLive.id,
+                            user_id: (currentUserLive as any).id,
                             user_name: (currentUserLive as any).name,
                             description: d,
                             is_urgent: Boolean(u),
                             status: ServiceStatus.PENDING,
                             visit_cost: 0,
                             archived: false,
+                            // NÃO setar createdAt string — created_at do Supabase assume default now()
                           },
                         ])
                         .select('*')
