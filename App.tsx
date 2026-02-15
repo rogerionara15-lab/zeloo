@@ -126,7 +126,15 @@ const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
     userName: String(row.user_name ?? row.userName ?? 'Cliente'),
     description: String(row.description ?? ''),
     isUrgent: Boolean(row.is_urgent ?? row.isUrgent ?? false),
-    status: (row.status ?? ServiceStatus.PENDING) as any,
+    status: (() => {
+  const raw = String(row.status ?? ServiceStatus.PENDING).toUpperCase();
+  if (raw === 'PENDING') return ServiceStatus.PENDING;
+  if (raw === 'SCHEDULED') return ServiceStatus.SCHEDULED;
+  if (raw === 'COMPLETED') return ServiceStatus.COMPLETED;
+  if (raw === 'CANCELLED') return ServiceStatus.CANCELLED;
+  return ServiceStatus.PENDING;
+})(),
+
     createdAt: row.created_at
       ? new Date(row.created_at).toLocaleDateString('pt-BR')
       : (row.createdAt ?? new Date().toLocaleDateString('pt-BR')),
