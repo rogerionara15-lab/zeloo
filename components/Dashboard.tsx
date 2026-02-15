@@ -302,22 +302,20 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   // ✅ Gate: se não tem atendimentos, não abre chamado e manda comprar extra
-  const ensureCanOpenRequest = () => {
-    // condomínio: se totalAppointmentsPlan=0, você pode mudar essa regra depois
-    if ((userData.planName || '').includes('Condomínio') && quota.totalAppointmentsPlan === 0) {
-      alert('Seu plano é sob consulta. Fale com o suporte para liberar seu pacote.');
-      return false;
-    }
+  // ✅ Gate leve: NÃO bloqueia por quota (isso é decidido no backend/RPC)
+const ensureCanOpenRequest = () => {
+  // condomínio sob consulta: mantém bloqueio
+  if ((userData.planName || '').includes('Condomínio') && quota.totalAppointmentsPlan === 0) {
+    alert('Seu plano é sob consulta. Fale com o suporte para liberar seu pacote.');
+    return false;
+  }
 
-    if (quota.remainingAppointments <= 0) {
-      alert('Você zerou seus atendimentos do mês. Para continuar, compre atendimentos extras.');
-      setExtraQty(1);
-      setShowExtraModal(true);
-      return false;
-    }
+  // ✅ Importante:
+  // Não bloqueia no front por "remainingAppointments" porque agora
+  // o backend (RPC) faz o controle real do mês e consome extras com segurança.
+  return true;
+};
 
-    return true;
-  };
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#F8FAFC]">
