@@ -11,9 +11,8 @@ interface DashboardProps {
   onGoHome?: () => void;
   onApproveVisitCost: (requestId: string) => void;
   onBuyExtraVisits: (userId: string, quantity: number) => void; // (mantido por compatibilidade, mas não usamos mais aqui)
-    onOpenCancel: () => void;
+  onOpenCancel: () => void;
   onOpenPayments: () => void;
-
 }
 
 type TabId = 'HOME' | 'HISTORY' | 'CHAT' | 'ACCOUNT';
@@ -45,9 +44,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   onAddRequest,
   onGoHome,
   onApproveVisitCost,
-    onOpenCancel,
+  onOpenCancel,
   onOpenPayments,
-
 }) => {
   // ✅ Segurança: se ainda não carregou usuário, não quebra tela
   if (!userData) {
@@ -324,8 +322,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#F8FAFC]">
       {/* SIDEBAR */}
-      <aside className="w-full md:w-80 bg-slate-950 text-white p-10 flex flex-col shrink-0 shadow-2xl z-[60]">
-        <div className="flex items-center gap-4 mb-14 cursor-pointer" onClick={onGoHome}>
+      <aside className="w-full md:w-80 bg-slate-950 text-white p-6 md:p-10 flex flex-col shrink-0 shadow-2xl z-[60]">
+        <div className="flex items-center gap-4 mb-10 md:mb-14 cursor-pointer" onClick={onGoHome}>
           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center font-black text-2xl">
             Z
           </div>
@@ -341,9 +339,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           <div className="mt-3 text-[10px] font-bold text-slate-300">
             {quota.remainingHours.toFixed(1)}h restantes • {quota.remainingAppointments} atendimentos
           </div>
-          <div className="mt-2 text-[10px] font-bold text-emerald-300">
-            Extras disponíveis: {quota.extrasAvailable}
-          </div>
+          <div className="mt-2 text-[10px] font-bold text-emerald-300">Extras disponíveis: {quota.extrasAvailable}</div>
         </div>
 
         <nav className="flex-grow space-y-3">
@@ -385,7 +381,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       </aside>
 
       {/* MAIN */}
-      <main className="flex-1 p-8 md:p-16 overflow-y-auto">
+      <main className="flex-1 p-4 sm:p-6 md:p-16 overflow-y-auto">
         {/* HOME */}
         {activeTab === 'HOME' && (
           <div className="animate-in fade-in space-y-10">
@@ -409,7 +405,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-              <div className="lg:col-span-2 bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm">
+              <div className="lg:col-span-2 bg-white p-6 md:p-12 rounded-[3.5rem] border border-slate-100 shadow-sm">
                 <div className="flex items-start justify-between gap-6 flex-wrap">
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Uso do plano</p>
@@ -417,9 +413,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-sm text-slate-500 font-semibold mt-2">
                       Restam <span className="font-black">{quota.remainingHours.toFixed(1)}h</span> este mês
                     </p>
-                    <p className="text-xs text-emerald-600 font-black mt-3">
-                      Extras disponíveis: {quota.extrasAvailable}
-                    </p>
+                    <p className="text-xs text-emerald-600 font-black mt-3">Extras disponíveis: {quota.extrasAvailable}</p>
                   </div>
 
                   <div className="text-right">
@@ -448,7 +442,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
 
-              <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-6 md:p-12 rounded-[3.5rem] border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ações rápidas</p>
                 <div className="mt-6 space-y-3">
                   <button
@@ -543,9 +537,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   >
                     <div className="flex-1 min-w-[260px]">
                       <div className="flex items-center gap-3 mb-3 flex-wrap">
-                        <span
-                          className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${statusPill(req.status)}`}
-                        >
+                        <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${statusPill(req.status)}`}>
                           {req.status}
                         </span>
 
@@ -615,8 +607,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {/* CHAT */}
         {activeTab === 'CHAT' && (
-          <div className="animate-in fade-in h-[720px] flex flex-col bg-white rounded-[3.5rem] border border-slate-100 shadow-xl overflow-hidden">
-            <header className="p-8 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+          <div className="animate-in fade-in h-[70vh] md:h-[720px] max-h-[90vh] flex flex-col bg-white rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-100 shadow-xl overflow-hidden">
+            <header className="p-4 sm:p-6 md:p-8 bg-slate-50 border-b border-slate-100 flex justify-between items-center gap-4 flex-wrap">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white text-xl">
                   💬
@@ -638,7 +630,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </header>
 
-            <div className="flex-1 p-8 overflow-y-auto space-y-6 bg-slate-50/30">
+            <div className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto space-y-6 bg-slate-50/30">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center opacity-30 py-20">
                   <span className="text-6xl mb-6">💬</span>
@@ -648,7 +640,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 chatMessages.map((msg) => (
                   <div key={msg.id} className={`flex ${msg.sender === 'USER' ? 'justify-end' : 'justify-start'}`}>
                     <div
-                      className={`max-w-[80%] p-6 rounded-[2rem] text-sm leading-relaxed ${
+                      className={`max-w-[85%] sm:max-w-[80%] p-4 sm:p-6 rounded-[2rem] text-sm leading-relaxed ${
                         msg.sender === 'USER'
                           ? 'bg-indigo-600 text-white rounded-tr-none shadow-lg'
                           : 'bg-white border border-slate-100 text-slate-800 rounded-tl-none font-medium'
@@ -670,17 +662,18 @@ const Dashboard: React.FC<DashboardProps> = ({
               <div ref={chatEndRef} />
             </div>
 
-            <form onSubmit={handleSendMessage} className="p-8 border-t border-slate-100 bg-white flex gap-4">
+            <form onSubmit={handleSendMessage} className="p-3 sm:p-4 md:p-6 border-t border-slate-100 bg-white flex gap-3">
               <input
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 placeholder="Agende horários, confirme recebimentos ou tire dúvidas..."
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-8 py-5 text-sm font-bold outline-none focus:border-indigo-600 transition-all"
+                className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-full px-4 sm:px-8 py-3 sm:py-5 text-sm font-bold outline-none focus:border-indigo-600 transition-all"
               />
               <button
                 type="submit"
-                className="w-16 h-16 bg-slate-950 text-white rounded-full flex items-center justify-center text-xl shadow-xl hover:scale-105 active:scale-95 transition-all"
+                className="shrink-0 w-12 h-12 sm:w-16 sm:h-16 bg-slate-950 text-white rounded-full flex items-center justify-center text-xl shadow-xl hover:scale-105 active:scale-95 transition-all"
+                aria-label="Enviar mensagem"
               >
                 ➔
               </button>
@@ -691,7 +684,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         {/* ACCOUNT */}
         {activeTab === 'ACCOUNT' && (
           <div className="animate-in fade-in max-w-3xl space-y-8">
-            <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-6 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-100 shadow-sm">
               <h2 className="text-2xl font-black uppercase text-slate-950 tracking-tight">Minha Conta</h2>
 
               <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-10">
@@ -719,24 +712,21 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="text-sm font-bold text-slate-600">{quota.remainingAppointments} atendimentos restantes</div>
                 </div>
 
-                <div className="mt-2 text-xs font-black text-emerald-600">
-                  Extras disponíveis: {quota.extrasAvailable}
-                </div>
+                <div className="mt-2 text-xs font-black text-emerald-600">Extras disponíveis: {quota.extrasAvailable}</div>
               </div>
 
-              <div className="mt-12 flex gap-3 flex-wrap">
+              {/* ✅ AQUI FOI CORRIGIDO: botões não ficam invertidos + responsivo */}
+              <div className="mt-12 flex flex-col sm:flex-row gap-3 w-full">
                 <button
-                  onClick={onOpenPayments}
-
-                  className="px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+                  onClick={onOpenCancel}
+                  className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
                 >
                   Solicitar cancelamento
                 </button>
 
                 <button
-                  onClick={onOpenCancel}
-
-                  className="px-8 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
+                  onClick={onOpenPayments}
+                  className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
                 >
                   Ver formas de pagamento
                 </button>
@@ -748,19 +738,19 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* MODAL: ATENDIMENTO EXTRA */}
       {showExtraModal && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-6">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 sm:p-6">
           <div
             className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in"
             onClick={() => (extraPayLoading ? null : setShowExtraModal(false))}
           />
 
-          <div className="relative bg-white rounded-[3.5rem] p-12 max-w-2xl w-full shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
+          <div className="relative bg-white rounded-[2.5rem] md:rounded-[3.5rem] p-6 md:p-12 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
             <div className="flex justify-between items-start gap-6 mb-8">
               <div>
                 <h3 className="text-3xl font-black text-slate-950 uppercase tracking-tighter">Atendimento extra</h3>
                 <p className="text-sm text-slate-600 font-semibold mt-3 leading-relaxed">
-                  Atendimento extra é um pacote adicional de suporte com duração de até <span className="font-black">3 horas</span>.
-                  Ideal quando você já utilizou os atendimentos do seu plano e precisa de mais um suporte rápido.
+                  Atendimento extra é um pacote adicional de suporte com duração de até{' '}
+                  <span className="font-black">3 horas</span>. Ideal quando você já utilizou os atendimentos do seu plano e precisa de mais um suporte rápido.
                 </p>
               </div>
 
@@ -774,7 +764,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
 
-            <div className="p-8 rounded-[2.5rem] bg-slate-50 border border-slate-100">
+            <div className="p-6 md:p-8 rounded-[2.5rem] bg-slate-50 border border-slate-100">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                 Valor por plano (1 atendimento = até 3h)
               </p>
@@ -802,7 +792,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
+              <div className="p-6 md:p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Quantidade</p>
 
                 <div className="mt-5 flex items-center gap-3">
@@ -844,7 +834,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </p>
               </div>
 
-              <div className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
+              <div className="p-6 md:p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total</p>
                 <p className="text-4xl font-black text-emerald-600 tracking-tighter mt-4">{brl(extraTotal)}</p>
                 <p className="mt-3 text-xs text-slate-500 font-semibold">Total calculado automaticamente pelo seu plano atual.</p>
@@ -878,9 +868,9 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* MODAL: NOVO CHAMADO */}
       {showModal && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-6">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 sm:p-6">
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in" onClick={() => setShowModal(false)} />
-          <div className="relative bg-white rounded-[3.5rem] p-12 max-w-xl w-full shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
+          <div className="relative bg-white rounded-[2.5rem] md:rounded-[3.5rem] p-6 md:p-12 max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
             <div className="flex justify-between items-center mb-10">
               <h3 className="text-3xl font-black text-slate-950 uppercase tracking-tighter">Novo Chamado Técnico</h3>
               <button onClick={() => setShowModal(false)} className="text-slate-300 hover:text-slate-950 font-black text-3xl">
@@ -895,11 +885,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                   value={newReq.desc}
                   onChange={(e) => setNewReq({ ...newReq, desc: e.target.value })}
                   placeholder="Descreva o problema com o máximo de detalhes para agilizarmos o reparo..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-8 text-sm font-bold h-48 outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-6 md:p-8 text-sm font-bold h-48 outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all"
                 />
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col sm:flex-row items-center gap-4">
                 <button
                   onClick={() => {
                     if (!ensureCanOpenRequest()) return;
@@ -909,7 +899,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     setNewReq({ desc: '', urgent: false });
                     handleTabClick('HISTORY');
                   }}
-                  className="flex-1 py-6 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-red-200 hover:bg-red-700 active:scale-95 transition-all"
+                  className="w-full flex-1 py-5 sm:py-6 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-red-200 hover:bg-red-700 active:scale-95 transition-all"
                 >
                   🚨 Emergência
                 </button>
@@ -923,7 +913,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     setNewReq({ desc: '', urgent: false });
                     handleTabClick('HISTORY');
                   }}
-                  className="flex-1 py-6 bg-slate-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-indigo-600 active:scale-95 transition-all"
+                  className="w-full flex-1 py-5 sm:py-6 bg-slate-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-indigo-600 active:scale-95 transition-all"
                 >
                   🛠️ Agendar visita
                 </button>
