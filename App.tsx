@@ -834,69 +834,52 @@ const App: React.FC = () => {
                     onAddRequest={async (d, u) => {
   if (!currentUserLive) return;
 
-  const planLimit = getPlanMonthlyLimit((currentUserLive as any).planName);
-
-  // condomínio / sob consulta (mantém sua regra)
-  if (planLimit <= 0) {
-    alert(
-      `Seu plano atual não possui atendimentos automáticos.\n\n` +
-      `Entre em contato com o suporte para liberar seu pacote.`
-    );
-    return;
-  }
-
-  // chama o RPC (isso é o que abate extra de forma segura)
-  const { data: requestId, error: rpcErr } = await supabase.rpc('create_request_consuming_extra', {
-    p_user_id: (currentUserLive as any).id,
-    p_description: d,
-    p_is_urgent: Boolean(u),
+  const resp = await fetch('/api/create-request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user_id: (currentUserLive as any).id,
+      description: d,
+      is_urgent: Boolean(u),
+    }),
   });
 
-  if (rpcErr) {
-    const msg = String(rpcErr.message || '');
+  const data = await resp.json();
 
-    if (msg.includes('NO_EXTRAS')) {
-      alert(
-        `Você já usou o limite do seu plano e não tem extras disponíveis.\n\n` +
-        `Para continuar, compre atendimentos extras.`
-      );
+  if (!resp.ok) {
+    if (data?.code === 'NO_EXTRAS') {
+      alert('Você zerou seus atendimentos do mês. Para continuar, compre atendimentos extras.');
       return;
     }
-
-    if (msg.includes('PLAN_NOT_ALLOWED')) {
+    if (data?.code === 'PLAN_NOT_ALLOWED') {
       alert('Seu plano é sob consulta. Fale com o suporte para liberar seu pacote.');
       return;
     }
-
-    if (msg.includes('FORBIDDEN')) {
-      alert('Sessão inválida. Faça login novamente.');
+    if (data?.code === 'NOT_PAID') {
+      alert('Seu pagamento ainda não foi liberado.');
+      return;
+    }
+    if (data?.code === 'BLOCKED') {
+      alert('Acesso bloqueado. Fale com o suporte.');
       return;
     }
 
-    console.error('❌ RPC create_request_consuming_extra falhou:', rpcErr);
-    alert(`Falha ao criar chamado:\n${rpcErr.message}`);
+    alert(data?.error || 'Falha ao criar chamado.');
     return;
   }
 
-  // opcional: buscar o request recém-criado e inserir no estado na hora
-  try {
-    if (requestId) {
-      const { data: reqRow, error: reqErr } = await supabase
-        .from('requests')
-        .select('*')
-        .eq('id', requestId)
-        .single();
+  const requestId = data?.request_id;
 
-      if (!reqErr && reqRow) {
-        const mapped = mapRequestRowToRequest(reqRow);
-        setMaintenanceRequests((prev) => [mapped, ...prev]);
-      }
+  // Busca o registro (ou realtime atualiza depois)
+  if (requestId) {
+    const { data: reqRow } = await supabase.from('requests').select('*').eq('id', requestId).single();
+    if (reqRow) {
+      const mapped = mapRequestRowToRequest(reqRow);
+      setMaintenanceRequests((prev) => [mapped, ...prev]);
     }
-  } catch (e) {
-    // Se falhar, realtime ainda vai atualizar
-    console.warn('Não consegui buscar o request recém-criado, mas realtime deve atualizar.', e);
   }
 }}
+
 
                     onGoHome={() => setView('LANDING')}
                     onApproveVisitCost={async (rid) => {
