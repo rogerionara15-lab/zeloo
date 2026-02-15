@@ -832,58 +832,72 @@ const App: React.FC = () => {
                     onOpenCancel={() => setView('CANCELAMENTO')}
                     onOpenPayments={() => setView('FORMAS_PAGAMENTO')}
                     onAddRequest={async (d, u) => {
-                      if (!currentUserLive) return;
+  if (!currentUserLive) return;
 
-                      const planLimit = getPlanMonthlyLimit((currentUserLive as any).planName);
-                      const extras = Number((currentUserLive as any).extraVisitsPurchased || 0);
-                      const totalLimit = planLimit + extras;
+  const planLimit = getPlanMonthlyLimit((currentUserLive as any).planName);
 
-                      if (totalLimit <= 0) {
-                        alert(
-                          `Seu plano atual não possui atendimentos automáticos.\n\n` +
-                          `Entre em contato com o suporte para liberar seu pacote.`
-                        );
-                        return;
-                      }
+  // condomínio / sob consulta (mantém sua regra)
+  if (planLimit <= 0) {
+    alert(
+      `Seu plano atual não possui atendimentos automáticos.\n\n` +
+      `Entre em contato com o suporte para liberar seu pacote.`
+    );
+    return;
+  }
 
-                      const used = await getUsedRequestsThisMonth((currentUserLive as any).id);
+  // chama o RPC (isso é o que abate extra de forma segura)
+  const { data: requestId, error: rpcErr } = await supabase.rpc('create_request_consuming_extra', {
+    p_user_id: (currentUserLive as any).id,
+    p_description: d,
+    p_is_urgent: Boolean(u),
+  });
 
-                      if (used >= totalLimit) {
-                        alert(
-                          `Você atingiu o limite do mês.\n\n` +
-                          `Plano: ${planLimit}\n` +
-                          `Extras: ${extras}\n` +
-                          `Usados este mês: ${used}\n\n` +
-                          `Para continuar, compre atendimentos extras.`
-                        );
-                        return;
-                      }
+  if (rpcErr) {
+    const msg = String(rpcErr.message || '');
 
-                      const { data, error } = await supabase
-                        .from('requests')
-                        .insert([
-                          {
-                            user_id: (currentUserLive as any).id,
-                            user_name: (currentUserLive as any).name,
-                            description: d,
-                            is_urgent: Boolean(u),
-                            status: ServiceStatus.PENDING,
-                            visit_cost: 0,
-                            archived: false,
-                          },
-                        ])
-                        .select('*')
-                        .single();
+    if (msg.includes('NO_EXTRAS')) {
+      alert(
+        `Você já usou o limite do seu plano e não tem extras disponíveis.\n\n` +
+        `Para continuar, compre atendimentos extras.`
+      );
+      return;
+    }
 
-                      if (error) {
-                        console.error('❌ Falha ao salvar chamado no Supabase:', error);
-                        alert(`Falha ao salvar chamado:\n${error.message}`);
-                        return;
-                      }
+    if (msg.includes('PLAN_NOT_ALLOWED')) {
+      alert('Seu plano é sob consulta. Fale com o suporte para liberar seu pacote.');
+      return;
+    }
 
-                      const mapped = mapRequestRowToRequest(data);
-                      setMaintenanceRequests((prev) => [mapped, ...prev]);
-                    }}
+    if (msg.includes('FORBIDDEN')) {
+      alert('Sessão inválida. Faça login novamente.');
+      return;
+    }
+
+    console.error('❌ RPC create_request_consuming_extra falhou:', rpcErr);
+    alert(`Falha ao criar chamado:\n${rpcErr.message}`);
+    return;
+  }
+
+  // opcional: buscar o request recém-criado e inserir no estado na hora
+  try {
+    if (requestId) {
+      const { data: reqRow, error: reqErr } = await supabase
+        .from('requests')
+        .select('*')
+        .eq('id', requestId)
+        .single();
+
+      if (!reqErr && reqRow) {
+        const mapped = mapRequestRowToRequest(reqRow);
+        setMaintenanceRequests((prev) => [mapped, ...prev]);
+      }
+    }
+  } catch (e) {
+    // Se falhar, realtime ainda vai atualizar
+    console.warn('Não consegui buscar o request recém-criado, mas realtime deve atualizar.', e);
+  }
+}}
+
                     onGoHome={() => setView('LANDING')}
                     onApproveVisitCost={async (rid) => {
                       setMaintenanceRequests((p) =>
