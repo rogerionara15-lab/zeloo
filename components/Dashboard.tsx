@@ -11,6 +11,9 @@ interface DashboardProps {
   onGoHome?: () => void;
   onApproveVisitCost: (requestId: string) => void;
   onBuyExtraVisits: (userId: string, quantity: number) => void; // (mantido por compatibilidade, mas não usamos mais aqui)
+    onOpenCancel: () => void;
+  onOpenPayments: () => void;
+
 }
 
 type TabId = 'HOME' | 'HISTORY' | 'CHAT' | 'ACCOUNT';
@@ -42,6 +45,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   onAddRequest,
   onGoHome,
   onApproveVisitCost,
+    onOpenCancel,
+  onOpenPayments,
+
 }) => {
   // ✅ Segurança: se ainda não carregou usuário, não quebra tela
   if (!userData) {
@@ -720,14 +726,16 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               <div className="mt-12 flex gap-3 flex-wrap">
                 <button
-                  onClick={() => alert('Cancelamento entra na próxima versão (com gateway + contratos).')}
+                  onClick={onOpenPayments}
+
                   className="px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
                 >
                   Solicitar cancelamento
                 </button>
 
                 <button
-                  onClick={() => alert('Na próxima etapa vamos conectar Mercado Pago/Stripe para Pix, cartão e boleto.')}
+                  onClick={onOpenCancel}
+
                   className="px-8 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
                 >
                   Ver formas de pagamento

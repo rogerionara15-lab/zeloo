@@ -26,6 +26,8 @@ import FAQ from './components/FAQ';
 import ContactConsultant from './components/ContactConsultant';
 import ZelooExpress from './components/ZelooExpress';
 import PosPagamento from './components/PosPagamento';
+import Cancelamento from './components/Cancelamento';
+import FormasPagamento from './components/FormasPagamento';
 
 import {
   PlanDetails,
@@ -208,15 +210,12 @@ const saveToLocal = (key: string, data: any) => {
 const replaceUrl = (path: string) => {
   try {
     window.history.replaceState({}, '', path);
-    // força o App a "perceber" a mudança
     window.dispatchEvent(new PopStateEvent('popstate'));
   } catch {}
 };
 
 // ----------------------
 // ✅ POS-EXTRA (CORRIGIDO)
-// - agora aceita email/qtd via query OU external_reference (extras:email:qtd:timestamp)
-// - e ao final volta pro App (re-render garantido pelo replaceUrl)
 // ----------------------
 const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
   const [status, setStatus] = useState<'LOADING' | 'OK' | 'FAIL'>('LOADING');
@@ -227,7 +226,7 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
       try {
         const params = new URLSearchParams(window.location.search);
 
-        const st = params.get('status'); // failure/pending etc.
+        const st = params.get('status');
         if (st === 'failure') {
           setStatus('FAIL');
           setMessage('Pagamento não concluído (falha). Tente novamente.');
@@ -239,11 +238,9 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
           return;
         }
 
-        // 1) tenta pegar email/qtd direto
         let email = params.get('email') || '';
         let qtd = Number(params.get('qtd') || '1');
 
-        // 2) fallback: tenta external_reference
         const ext =
           params.get('external_reference') ||
           params.get('externalReference') ||
@@ -251,7 +248,6 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
           '';
 
         if ((!email || !Number.isFinite(qtd)) && ext.startsWith('extras:')) {
-          // formato: extras:email:qtd:timestamp
           const parts = ext.split(':');
           if (parts.length >= 3) {
             email = email || parts[1] || '';
@@ -268,7 +264,6 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
           return;
         }
 
-        // 3) buscar usuário pelo email
         const { data: user, error: uErr } = await supabase
           .from('users')
           .select('id, extra_visits_purchased')
@@ -285,7 +280,6 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
         const add = Number.isFinite(qtd) ? qtd : 1;
         const next = current + add;
 
-        // 4) atualizar créditos
         const { error: upErr } = await supabase
           .from('users')
           .update({ extra_visits_purchased: next })
@@ -300,7 +294,6 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
         setStatus('OK');
         setMessage(`✅ Crédito liberado! Você recebeu +${add} atendimento(s) extra(s).`);
 
-        // 5) volta pro app (sem reload, mas com re-render)
         setTimeout(() => {
           replaceUrl('/');
         }, 900);
@@ -343,13 +336,11 @@ const App: React.FC = () => {
 
   const [branding, setBranding] = useState<BrandingInfo>(() => getFromLocal('branding', BRANDING_DATA));
 
-  // ✅ Sempre começa vazio e hidrata do Supabase
   const [registeredUsers, setRegisteredUsers] = useState<UserRegistration[]>([]);
   const [currentUser, setCurrentUser] = useState<UserRegistration | null>(null);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
-  // ✅ mini-router: path reativo
   const [path, setPath] = useState<string>(() => window.location.pathname);
 
   useEffect(() => {
@@ -358,7 +349,6 @@ const App: React.FC = () => {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  // ✅ REMOVIDO: Plano Teste (R$ 1)
   const [availablePlans] = useState<PlanDetails[]>([
     {
       name: 'Central Essencial Residencial',
@@ -396,7 +386,12 @@ const App: React.FC = () => {
       tier: 'Sob consulta',
       price: 'A partir de R$ 1500',
       period: '/mês',
-      features: ['Pacote mensal de horas (contrato)', 'SLA e cobertura personalizada', 'Equipe qualificada para manutenção predial', 'Relatórios e histórico de atendimentos'],
+      features: [
+        'Pacote mensal de horas (contrato)',
+        'SLA e cobertura personalizada',
+        'Equipe qualificada para manutenção predial',
+        'Relatórios e histórico de atendimentos',
+      ],
       highlight: false,
       save: 'Contrato personalizado',
     },
@@ -417,9 +412,7 @@ const App: React.FC = () => {
     })
   );
 
-  // ----------------------
   // Hydrate do Supabase
-  // ----------------------
   useEffect(() => {
     const hydrate = async () => {
       const [uRes, rRes, cRes] = await Promise.all([
@@ -440,9 +433,7 @@ const App: React.FC = () => {
     hydrate();
   }, []);
 
-  // ----------------------
   // Realtime
-  // ----------------------
   useEffect(() => {
     const ch = supabase
       .channel('zeloo-realtime')
@@ -504,7 +495,6 @@ const App: React.FC = () => {
           return [mapped, ...prev];
         });
 
-        // ✅ CRÍTICO: se o usuário atualizado for o logado, atualiza currentUser também
         setCurrentUser((prev) => {
           if (!prev?.id) return prev;
           if (prev.id !== mapped.id) return prev;
@@ -518,7 +508,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // ✅ sync extra: se registeredUsers mudar, garante que currentUser acompanha
   useEffect(() => {
     if (!currentUser?.id) return;
     const fresh = registeredUsers.find((u) => u.id === currentUser.id);
@@ -526,7 +515,6 @@ const App: React.FC = () => {
     setCurrentUser((prev) => (prev ? ({ ...prev, ...fresh } as any) : prev));
   }, [registeredUsers, currentUser?.id]);
 
-  // cache local só branding/admin
   useEffect(() => {
     saveToLocal('branding', branding);
     saveToLocal('admin', adminProfile);
@@ -537,7 +525,6 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // porteiro do login
   const handleLogin = (role: UserRole, isMaster: boolean = false, userData?: UserRegistration) => {
     setIsSuperUser(isMaster);
 
@@ -565,7 +552,6 @@ const App: React.FC = () => {
     setShowLoginModal(false);
   };
 
-  // chat
   const handleSendChatMessage = async (text: string, sender: 'USER' | 'ADMIN', userId: string, userName: string) => {
     const newMessage: ChatMessage = {
       id: makeUuid(),
@@ -591,14 +577,11 @@ const App: React.FC = () => {
     if (error) console.warn('Falha ao salvar chat no Supabase:', error);
   };
 
-  // aprovar/reprovar pagamento
   const handleHandlePaymentAction = async (userId: string, action: 'APPROVE' | 'REJECT') => {
     const paymentStatus = action === 'APPROVE' ? 'PAID' : 'REJECTED';
     const isBlocked = action === 'REJECT';
 
-    setRegisteredUsers((prev) =>
-      prev.map((u) => (u.id === userId ? ({ ...u, paymentStatus, isBlocked } as any) : u))
-    );
+    setRegisteredUsers((prev) => prev.map((u) => (u.id === userId ? ({ ...u, paymentStatus, isBlocked } as any) : u)));
 
     const { error } = await supabase.from('users').update({ payment_status: paymentStatus, is_blocked: isBlocked }).eq('id', userId);
     if (error) console.warn('Falha ao atualizar pagamento no Supabase:', error);
@@ -610,7 +593,6 @@ const App: React.FC = () => {
     }
   };
 
-  // auto-arquivamento
   useEffect(() => {
     const now = Date.now();
     let changed = false;
@@ -695,31 +677,19 @@ const App: React.FC = () => {
     alert('Verificação concluída ✅ (arquivamento automático aplicado quando cabível)');
   };
 
-  // trava final
   const currentUserLive = currentUser ? (registeredUsers.find((u) => u.id === currentUser.id) || currentUser) : null;
   const canAccessDashboard =
     !!currentUserLive && (currentUserLive as any).paymentStatus === 'PAID' && !(currentUserLive as any).isBlocked;
 
-  // ----------------------
-  // ✅ PORTEIRO DE URL (rotas sem router)
-  // ----------------------
-  // (agora usa `path` reativo)
-  if (path === '/pos-extra') {
-    return <PosExtra supabase={supabase} />;
-  }
+  // rotas sem router
+  if (path === '/pos-extra') return <PosExtra supabase={supabase} />;
 
   if (path === '/pos-pagamento') {
     return (
       <PosPagamento
-        onBack={() => {
-          replaceUrl('/');
-        }}
+        onBack={() => replaceUrl('/')}
         onApproved={(email) => {
-          setPendingRegistration((prev: any) => ({
-            ...(prev || {}),
-            email,
-            paymentStatus: 'PAID',
-          }));
+          setPendingRegistration((prev: any) => ({ ...(prev || {}), email, paymentStatus: 'PAID' }));
           replaceUrl(`/criar-conta?email=${encodeURIComponent(email)}`);
         }}
       />
@@ -749,23 +719,16 @@ const App: React.FC = () => {
           }
 
           const savedUser = mapUserRowToUser(data);
-
           setRegisteredUsers((prev) => [savedUser, ...prev]);
           setCurrentUser(savedUser);
           setView('DASHBOARD');
-
           replaceUrl('/');
         }}
-        onCancel={() => {
-          replaceUrl('/');
-        }}
+        onCancel={() => replaceUrl('/')}
       />
     );
   }
 
-  // ----------------------
-  // ✅ APP PRINCIPAL (views)
-  // ----------------------
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 selection:bg-indigo-600 selection:text-white">
       {view === 'LANDING' && <Header onOpenLogin={() => setShowLoginModal(true)} />}
@@ -787,7 +750,11 @@ const App: React.FC = () => {
               }}
             />
             <AIAssistant onOpenCounselor={() => navigateTo('SMART_COUNSELOR')} />
-            <BudgetGenerator isLoggedIn={!!currentUser} onAuthRequired={() => setShowLoginModal(true)} userPlan={(currentUser as any)?.planName} />
+            <BudgetGenerator
+              isLoggedIn={!!currentUser}
+              onAuthRequired={() => setShowLoginModal(true)}
+              userPlan={(currentUser as any)?.planName}
+            />
             <Pricing
               onSelectPlan={(p) => {
                 setSelectedPlan(p);
@@ -815,12 +782,14 @@ const App: React.FC = () => {
               onContactClick={() => navigateTo('CONTACT')}
               onClientAreaClick={() => setShowLoginModal(true)}
             />
+
             <button
               onClick={() => setShowExpress(true)}
               className="fixed bottom-8 right-8 w-16 h-16 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl hover:scale-110 active:scale-95 transition-all z-40 border-4 border-white"
             >
               ⚡
             </button>
+
             {showExpress && (
               <ZelooExpress
                 isOpen={showExpress}
@@ -860,15 +829,15 @@ const App: React.FC = () => {
                     requests={maintenanceRequests.filter((r) => (r as any).userId === currentUserLive.id)}
                     chatMessages={chatMessages.filter((m) => (m as any).userId === currentUserLive.id)}
                     onSendChatMessage={handleSendChatMessage}
+                    onOpenCancel={() => setView('CANCELAMENTO')}
+                    onOpenPayments={() => setView('FORMAS_PAGAMENTO')}
                     onAddRequest={async (d, u) => {
                       if (!currentUserLive) return;
 
-                      // ✅ BLOQUEIO REAL: checa limite do mês ANTES de inserir
                       const planLimit = getPlanMonthlyLimit((currentUserLive as any).planName);
                       const extras = Number((currentUserLive as any).extraVisitsPurchased || 0);
                       const totalLimit = planLimit + extras;
 
-                      // se plano não dá direito a chamados (ex: condomínio sob consulta)
                       if (totalLimit <= 0) {
                         alert(
                           `Seu plano atual não possui atendimentos automáticos.\n\n` +
@@ -887,10 +856,6 @@ const App: React.FC = () => {
                           `Usados este mês: ${used}\n\n` +
                           `Para continuar, compre atendimentos extras.`
                         );
-
-                        // mantém no dashboard (onde normalmente existe o botão/componente de compra)
-                        // se você tiver uma rota própria pra compra, troque aqui:
-                        // replaceUrl('/comprar-extras');
                         return;
                       }
 
@@ -905,7 +870,6 @@ const App: React.FC = () => {
                             status: ServiceStatus.PENDING,
                             visit_cost: 0,
                             archived: false,
-                            // NÃO setar createdAt string — created_at do Supabase assume default now()
                           },
                         ])
                         .select('*')
@@ -1041,9 +1005,7 @@ const App: React.FC = () => {
                   planName={selectedPlan?.name || ''}
                   paymentStatus={pendingRegistration?.paymentStatus}
                   onContinue={() => navigateTo('CREATE_ACCOUNT')}
-                  onConfirmPayment={() => {
-                    replaceUrl('/pos-pagamento');
-                  }}
+                  onConfirmPayment={() => replaceUrl('/pos-pagamento')}
                 />
               )}
 
@@ -1114,6 +1076,9 @@ const App: React.FC = () => {
               {view === 'TERMS' && <TermsOfUse onBack={() => navigateTo('LANDING')} onPrivacyClick={() => navigateTo('PRIVACY')} />}
               {view === 'FAQ' && <FAQ onBack={() => navigateTo('LANDING')} onContact={() => navigateTo('CONTACT')} />}
               {view === 'CONTACT' && <ContactConsultant onBack={() => navigateTo('LANDING')} />}
+
+              {view === 'CANCELAMENTO' && <Cancelamento onBack={() => setView('DASHBOARD')} />}
+              {view === 'FORMAS_PAGAMENTO' && <FormasPagamento onBack={() => setView('DASHBOARD')} />}
             </div>
           </div>
         )}
