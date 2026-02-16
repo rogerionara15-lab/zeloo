@@ -568,78 +568,86 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const RequestActions: React.FC<{ req: MaintenanceRequest }> = ({ req }) => {
-    const canAct =
-      req.archived !== true &&
-      req.status !== ServiceStatus.COMPLETED &&
-      req.status !== ServiceStatus.CANCELLED;
+  // ✅ normaliza status vindo do Supabase (pending/scheduled/etc -> PENDING/SCHEDULED)
+  const normStatus = (s: any) => String(s ?? '').trim().toUpperCase() as ServiceStatus;
 
-    return (
-      <div className="flex gap-3 flex-wrap">
-        {req.status === ServiceStatus.PENDING && req.archived !== true && (
-          <>
-            <button
-              onClick={() => openReplyModal(req)}
-              className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-slate-950 transition-all"
-            >
-              Responder
-            </button>
+  const status = normStatus((req as any)?.status);
 
-            <button
-              onClick={() => onUpdateRequestStatus(req.id, ServiceStatus.SCHEDULED)}
-              className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all"
-            >
-              Agendar
-            </button>
+  const canAct =
+    req.archived !== true &&
+    status !== ServiceStatus.COMPLETED &&
+    status !== ServiceStatus.CANCELLED;
 
-            <button
-              onClick={() => {
-                const u = (users || []).find((x: any) => String(x?.id) === String((req as any)?.userId));
-                if (u) openClientCard(u);
-                else alert('Não encontrei dados do cliente na Base de Assinantes.');
-              }}
-              className="px-6 py-3 bg-white border border-slate-200 text-slate-900 rounded-xl text-[9px] font-black uppercase hover:bg-slate-50 transition-all"
-            >
-              Agenda
-            </button>
-          </>
-        )}
+  return (
+    <div className="flex gap-3 flex-wrap">
+      {status === ServiceStatus.PENDING && req.archived !== true && (
+        <>
+          <button
+            onClick={() => openReplyModal(req)}
+            className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-slate-950 transition-all"
+          >
+            Responder
+          </button>
 
-        {req.status === ServiceStatus.SCHEDULED && req.archived !== true && (
-          <>
-            <button
-              onClick={() => openHoursModal(req)}
-              className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-700 transition-all"
-            >
-              Concluir (Horas)
-            </button>
+          <button
+            onClick={() => onUpdateRequestStatus(req.id, ServiceStatus.SCHEDULED)}
+            className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all"
+          >
+            Agendar
+          </button>
 
-            <button
-              onClick={() => {
-                const u = (users || []).find((x: any) => String(x?.id) === String((req as any)?.userId));
-                if (u) openClientCard(u);
-                else alert('Não encontrei dados do cliente na Base de Assinantes.');
-              }}
-              className="px-6 py-3 bg-white border border-slate-200 text-slate-900 rounded-xl text-[9px] font-black uppercase hover:bg-slate-50 transition-all"
-            >
-              Agenda
-            </button>
-          </>
-        )}
-
-        {canAct && (
           <button
             onClick={() => {
-              const ok = window.confirm('Deseja cancelar este chamado?');
-              if (ok) onUpdateRequestStatus(req.id, ServiceStatus.CANCELLED);
+              const u = (users || []).find((x: any) => String(x?.id) === String((req as any)?.userId));
+              if (u) openClientCard(u);
+              else alert('Não encontrei dados do cliente na Base de Assinantes.');
             }}
-            className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
+            className="px-6 py-3 bg-white border border-slate-200 text-slate-900 rounded-xl text-[9px] font-black uppercase hover:bg-slate-50 transition-all"
           >
-            Cancelar
+            Agenda
           </button>
-        )}
-      </div>
-    );
-  };
+        </>
+      )}
+
+      {status === ServiceStatus.SCHEDULED && req.archived !== true && (
+        <>
+          <button
+            onClick={() => openHoursModal(req)}
+            className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-700 transition-all"
+          >
+            Concluir (Horas)
+          </button>
+
+          <button
+            onClick={() => {
+              const u = (users || []).find((x: any) => String(x?.id) === String((req as any)?.userId));
+              if (u) openClientCard(u);
+              else alert('Não encontrei dados do cliente na Base de Assinantes.');
+            }}
+            className="px-6 py-3 bg-white border border-slate-200 text-slate-900 rounded-xl text-[9px] font-black uppercase hover:bg-slate-50 transition-all"
+          >
+            Agenda
+          </button>
+        </>
+      )}
+
+      {canAct && (
+        <button
+          onClick={() => {
+            const ok = confirm('Deseja cancelar este chamado?');
+            if (ok) onUpdateRequestStatus(req.id, ServiceStatus.CANCELLED);
+          }}
+          className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
+        >
+          Cancelar
+        </button>
+      )}
+    </div>
+  );
+};
+
+
+        
 
   const formatAddress = (u: any) => {
     const parts = [
