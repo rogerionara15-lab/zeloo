@@ -19,19 +19,19 @@ type TabId = 'HOME' | 'HISTORY' | 'CHAT' | 'ACCOUNT';
 type HistoryView = 'ACTIVE' | 'ARCHIVED';
 
 const parsePtBrDate = (s: string): Date | null => {
-  // Espera "dd/mm/aaaa"
-  const parts = s?.split('/');
-  if (!parts || parts.length !== 3) return null;
+  // Pega dd/mm/aaaa mesmo que venha com hora depois (ex: "16/02/2026 12:34" ou "16/02/2026, 12:34")
+  const match = String(s || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!match) return null;
 
-  const [ddStr, mmStr, yyyyStr] = parts;
-  const dd = Number(ddStr);
-  const mm = Number(mmStr);
-  const yyyy = Number(yyyyStr);
+  const dd = Number(match[1]);
+  const mm = Number(match[2]);
+  const yyyy = Number(match[3]);
 
   if (!Number.isFinite(dd) || !Number.isFinite(mm) || !Number.isFinite(yyyy)) return null;
 
   return new Date(yyyy, mm - 1, dd);
 };
+
 
 const ADMIN_WHATSAPP = '5543996000274'; // ✅ troque se quiser outro número
 
@@ -156,6 +156,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     // Só CONCLUÍDOS do mês atual contam (mantém compatível com seu formato atual)
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
+// ✅ Se o backend já salva o consumo mensal no usuário, usamos isso (fica 100% igual ao bloqueio real)
+const monthlyUsedAppointmentsFromDB = Number((userData as any)?.monthlyUsedAppointments);
+const monthlyUsedHoursFromDB = Number((userData as any)?.monthlyUsedHours);
+
+const hasDBUsage =
+  Number.isFinite(monthlyUsedAppointmentsFromDB) || Number.isFinite(monthlyUsedHoursFromDB);
 
     const completedThisMonth = requests.filter((r) => {
       if (r.status !== ServiceStatus.COMPLETED) return false;
@@ -163,13 +169,17 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (!d) return false;
       return `${d.getFullYear()}-${d.getMonth()}` === monthKey;
     });
+const usedHours = hasDBUsage
+  ? (Number.isFinite(monthlyUsedHoursFromDB) ? monthlyUsedHoursFromDB : 0)
+  : completedThisMonth.reduce((sum, r) => sum + (Number(r.visitCost) || 0), 0);
 
-    const usedHours = completedThisMonth.reduce((sum, r) => sum + (Number(r.visitCost) || 0), 0);
-
-    const usedAppointments = completedThisMonth.reduce((sum, r) => {
+const usedAppointments = hasDBUsage
+  ? (Number.isFinite(monthlyUsedAppointmentsFromDB) ? monthlyUsedAppointmentsFromDB : 0)
+  : completedThisMonth.reduce((sum, r) => {
       const h = Number(r.visitCost) || 0;
       return sum + (h > 0 ? Math.ceil(h / 3) : 0);
     }, 0);
+
 
     const remainingHours = Math.max(0, totalHours - usedHours);
     const remainingAppointments = Math.max(0, totalAppointments - usedAppointments);
