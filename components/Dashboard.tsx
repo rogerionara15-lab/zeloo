@@ -163,22 +163,27 @@ const monthlyUsedHoursFromDB = Number((userData as any)?.monthlyUsedHours);
 const hasDBUsage =
   Number.isFinite(monthlyUsedAppointmentsFromDB) || Number.isFinite(monthlyUsedHoursFromDB);
 
-    const completedThisMonth = requests.filter((r) => {
-      if (r.status !== ServiceStatus.COMPLETED) return false;
-      const d = parsePtBrDate(r.createdAt);
-      if (!d) return false;
-      return `${d.getFullYear()}-${d.getMonth()}` === monthKey;
-    });
-const usedHours = hasDBUsage
-  ? (Number.isFinite(monthlyUsedHoursFromDB) ? monthlyUsedHoursFromDB : 0)
-  : completedThisMonth.reduce((sum, r) => sum + (Number(r.visitCost) || 0), 0);
+  // ✅ Conta consumo pelo mês considerando chamados ATIVOS (PENDING/SCHEDULED/COMPLETED)
+// porque o backend está controlando o bloqueio na abertura.
+const billableThisMonth = requests.filter((r) => {
+  if (r.status === ServiceStatus.CANCELLED) return false; // cancelado não conta
+  const d = parsePtBrDate(r.createdAt);
+  if (!d) return false;
+  return `${d.getFullYear()}-${d.getMonth()}` === monthKey;
+});
 
-const usedAppointments = hasDBUsage
-  ? (Number.isFinite(monthlyUsedAppointmentsFromDB) ? monthlyUsedAppointmentsFromDB : 0)
-  : completedThisMonth.reduce((sum, r) => {
-      const h = Number(r.visitCost) || 0;
-      return sum + (h > 0 ? Math.ceil(h / 3) : 0);
-    }, 0);
+// Cada chamado “consome” 1 atendimento do plano.
+// Horas exatas só existem quando conclui, então aqui é estimativa (3h por atendimento),
+// só pra UI bater com a regra de bloqueio.
+const usedAppointments = billableThisMonth.length;
+
+// Se tiver visitCost, soma real; senão assume 3h por chamado ativo (estimativa)
+const usedHours = billableThisMonth.reduce((sum, r) => {
+  const h = Number((r as any).visitCost);
+  if (Number.isFinite(h) && h > 0) return sum + h;
+  return sum + 3;
+}, 0);
+
 
 
     const remainingHours = Math.max(0, totalHours - usedHours);
