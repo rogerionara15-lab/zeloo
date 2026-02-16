@@ -353,35 +353,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // ✅ RESET MENSAL (chama sua API)
   const resetMonthlyForUser = async (userId: string) => {
-    try {
-      const ok = confirm(
-        'Resetar contador mensal desse cliente?\n\nIsso serve para TESTE (deixar como se ele tivesse 0 chamados usados no mês).'
-      );
-      if (!ok) return;
+  try {
+    const ok = confirm(
+      'Resetar contador mensal desse cliente?\n\nIsso serve para TESTE (deixar como se ele tivesse 0 chamados usados no mês).'
+    );
+    if (!ok) return;
 
-      // tenta POST
-      let res = await fetch('/api/reset-monthly', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
+    const res = await fetch('/api/reset-monthly-usage', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }), // ✅ aqui é user_id
+    });
 
-      // fallback GET
-      if (!res.ok) {
-        res = await fetch(`/api/reset-monthly?userId=${encodeURIComponent(userId)}`, { method: 'GET' });
-      }
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        alert(`Falha no reset mensal.\n\nStatus: ${res.status}\n${txt || ''}`);
-        return;
-      }
-
-      alert('✅ Reset mensal aplicado com sucesso!\n\nAgora faça logout/login no usuário de teste e tente abrir chamados novamente.');
-    } catch (e: any) {
-      alert(`Erro no reset mensal: ${e?.message || 'Erro desconhecido'}`);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      alert(`Falha no reset mensal.\n\nStatus: ${res.status}\n${txt || ''}`);
+      return;
     }
-  };
+
+    const json = await res.json().catch(() => null);
+    alert(`✅ Reset mensal aplicado!\nMovidos: ${json?.moved ?? '—'} chamados.\n\nAgora faça logout/login no usuário de teste e tente abrir chamados novamente.`);
+  } catch (e: any) {
+    alert(`Erro no reset mensal: ${e?.message || 'Erro desconhecido'}`);
+  }
+};
+
 
   // ✅ AGENDA: abrir ficha do cliente
   const openClientCard = (u: any) => {
