@@ -191,6 +191,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   void setBranding;
 
   const [activeTab, setActiveTab] = useState<TabId>('OVERVIEW');
+    // ✅ bolinha vermelha universal para O.S
+  const [hasNewRequests, setHasNewRequests] = useState(false);
+
+  // ✅ lastSeen universal vindo da API (PC e celular)
+  const [requestsLastSeen, setRequestsLastSeen] = useState<string>('');
+
   const [viewingProof, setViewingProof] = useState<string | null>(null);
 
   const [clientSearch, setClientSearch] = useState('');
@@ -254,6 +260,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         writeLastSeenMapLocal(ls.data.lastSeenMap || {}); // cache
       } else {
         setLastSeenMap(readLastSeenMapLocal());
+              // ✅ Last seen REQUESTS (O.S) — UNIVERSAL via API
+      const rs = await apiFetchJson<{ lastSeen: string }>('/api/update-request', {
+  method: 'POST',
+  body: JSON.stringify({ action: 'GET_LAST_SEEN_REQUESTS' }),
+});
+
+if (rs.ok) {
+  setRequestsLastSeen(rs.data?.lastSeen || '');
+}
+
+      if (rs.ok && rs.data?.lastSeen) {
+        setRequestsLastSeen(rs.data.lastSeen || '');
+      } else {
+        // sem localStorage (você pediu universal). Se falhar, fica vazio
+        setRequestsLastSeen('');
+      }
+
       }
     })();
 
@@ -266,6 +289,71 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+    // ✅ Detecta O.S nova de forma UNIVERSAL (compara latest createdAt vs requestsLastSeen)
+  useEffect(() => {
+    const list = requests || [];
+    if (!list.length) {
+      setHasNewRequests(false);
+      return;
+    }
+
+    const latestCreatedAt =
+      list
+        .map((r: any) => String(r?.createdAt || '').trim())
+        .filter(Boolean)
+        .sort((a: string, b: string) => b.localeCompare(a))[0] || '';
+
+    if (!latestCreatedAt) {
+      setHasNewRequests(false);
+      return;
+    }
+
+    // evita bolinha “falsa” antes de carregar o lastSeen do backend
+    if (!requestsLastSeen) {
+      setHasNewRequests(false);
+      return;
+    }
+
+    setHasNewRequests(latestCreatedAt > requestsLastSeen);
+  }, [requests, requestsLastSeen]);
+  // ✅ Ao abrir a aba O.S, marca como visto (UNIVERSAL via API)
+  useEffect(() => {
+    if (activeTab !== 'REQUESTS') return;
+
+    const list = requests || [];
+    if (!list.length) {
+      setHasNewRequests(false);
+      return;
+    }
+
+    const latestCreatedAt =
+      list
+        .map((r: any) => String(r?.createdAt || '').trim())
+        .filter(Boolean)
+        .sort((a: string, b: string) => b.localeCompare(a))[0] || '';
+
+    if (!latestCreatedAt) {
+      setHasNewRequests(false);
+      return;
+    }
+
+    // apaga bolinha e atualiza estado local
+    setHasNewRequests(false);
+    setRequestsLastSeen(latestCreatedAt);
+
+    // grava universal (não quebra painel se falhar)
+    apiFetchJson('/api/update-request', {
+  method: 'POST',
+  body: JSON.stringify({
+    action: 'SET_LAST_SEEN_REQUESTS',
+    lastSeen: latestCreatedAt,
+  }),
+}).then((r) => {
+  if (!r.ok) console.warn('Falha ao salvar lastSeen de O.S no backend:', r.status, r.text);
+});
+
+  }, [activeTab, requests]);
+
   const stats = useMemo(
     () => ({
       totalPaid: (users || []).filter((u: any) => u?.paymentStatus === 'PAID').length,
@@ -718,11 +806,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="text-xl">{item.icon}</span>
                 <span className="text-[11px] tracking-widest uppercase">{item.label}</span>
               </div>
-              {item.badge ? (
-                <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black">
-                  {item.badge}
-                </span>
-              ) : null}
+              {item.badge || (item.id === 'REQUESTS' && hasNewRequests) ? (
+  <div className="flex items-center gap-2">
+    {item.id === 'REQUESTS' && hasNewRequests ? (
+      <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+    ) : null}
+
+    {item.badge ? (
+      <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black">
+        {item.badge}
+      </span>
+    ) : null}
+  </div>
+) : null}
+
             </button>
           ))}
         </nav>
