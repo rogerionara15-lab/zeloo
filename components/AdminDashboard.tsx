@@ -270,7 +270,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     () => ({
       totalPaid: (users || []).filter((u: any) => u?.paymentStatus === 'PAID').length,
       awaiting: (users || []).filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL').length,
-      pendingReq: (requests || []).filter((r) => r.status === ServiceStatus.PENDING).length,
+      pendingReq: (requests || []).filter((r: any) => {
+  const st = String(r?.status ?? '').trim().toUpperCase();
+  const isArchived = r?.archived === true || String(r?.archived ?? '').toLowerCase() === 'true';
+  return st === 'PENDING' && !isArchived;
+}).length,
+
+
     }),
     [users, requests]
   );
