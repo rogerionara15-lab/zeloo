@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AdminProfile,
   UserRegistration,
@@ -32,7 +32,7 @@ interface AdminDashboardProps {
 type TabId = 'OVERVIEW' | 'FINANCIAL' | 'REQUESTS' | 'CONCIERGE' | 'CLIENTS' | 'EXTRA_ORDERS';
 type ArchiveView = 'ACTIVE' | 'ARCHIVED';
 
-/** ✅ Pedidos de atendimentos extras (registrados localmente por enquanto) */
+/** ✅ Pedidos de atendimentos extras */
 type ExtraOrderStatus = 'PENDING' | 'PAID' | 'CANCELLED';
 
 type ExtraOrder = {
@@ -59,51 +59,62 @@ const safeText = (v: any, fallback = '') => {
   return s ? s : fallback;
 };
 
+const normalizeExtraOrders = (raw: any): ExtraOrder[] => {
+  if (!Array.isArray(raw)) return [];
+  const normalized: ExtraOrder[] = raw
+    .map((o: any) => {
+      const qty = safeNumber(o?.qty ?? o?.quantity ?? 1, 1);
+      const unitPrice = safeNumber(o?.unitPrice ?? o?.price ?? 0, 0);
+      const total = safeNumber(o?.total, unitPrice * qty);
+
+      const statusRaw = String(o?.status ?? 'PENDING').toUpperCase();
+      const status: ExtraOrderStatus =
+        statusRaw === 'PAID' || statusRaw === 'CANCELLED' ? statusRaw : 'PENDING';
+
+      const createdAt = safeText(o?.createdAt, new Date().toLocaleString('pt-BR'));
+
+      return {
+        id: safeText(o?.id, `extra-${Date.now()}`),
+        userId: safeText(o?.userId, '—'),
+        userName: safeText(o?.userName, 'Usuário'),
+        userPlan: safeText(o?.userPlan ?? o?.planName, ''),
+        qty,
+        unitPrice,
+        total,
+        createdAt,
+        status,
+      };
+    })
+    .filter(Boolean);
+
+  normalized.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  return normalized;
+};
+
+const EXTRA_ORDERS_LS_KEY = 'zeloo_extra_orders';
+const LAST_SEEN_LS_KEY = 'zeloo_admin_last_seen_v1';
+
+// ✅ fallback local (só se API falhar)
 const readExtraOrdersFromLocal = (): ExtraOrder[] => {
   try {
-    const raw = localStorage.getItem('zeloo_extra_orders');
+    const raw = localStorage.getItem(EXTRA_ORDERS_LS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    const normalized: ExtraOrder[] = parsed
-      .map((o: any) => {
-        const qty = safeNumber(o?.qty ?? o?.quantity ?? 1, 1);
-        const unitPrice = safeNumber(o?.unitPrice ?? o?.price ?? 0, 0);
-        const total = safeNumber(o?.total, unitPrice * qty);
-
-        const statusRaw = String(o?.status ?? 'PENDING').toUpperCase();
-        const status: ExtraOrderStatus =
-          statusRaw === 'PAID' || statusRaw === 'CANCELLED' ? statusRaw : 'PENDING';
-
-        const createdAt = safeText(o?.createdAt, new Date().toLocaleString('pt-BR'));
-
-        return {
-          id: safeText(o?.id, `extra-${Date.now()}`),
-          userId: safeText(o?.userId, '—'),
-          userName: safeText(o?.userName, 'Usuário'),
-          userPlan: safeText(o?.userPlan ?? o?.planName, ''),
-          qty,
-          unitPrice,
-          total,
-          createdAt,
-          status,
-        };
-      })
-      .filter(Boolean);
-
-    normalized.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-    return normalized;
+    return normalizeExtraOrders(parsed);
   } catch {
     return [];
   }
 };
 
-const LAST_SEEN_KEY = 'zeloo_admin_last_seen_v1';
-
-const readLastSeenMap = (): Record<string, string> => {
+const writeExtraOrdersToLocal = (orders: ExtraOrder[]) => {
   try {
-    const raw = localStorage.getItem(LAST_SEEN_KEY);
+    localStorage.setItem(EXTRA_ORDERS_LS_KEY, JSON.stringify(orders));
+  } catch {}
+};
+
+const readLastSeenMapLocal = (): Record<string, string> => {
+  try {
+    const raw = localStorage.getItem(LAST_SEEN_LS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return {};
@@ -113,10 +124,46 @@ const readLastSeenMap = (): Record<string, string> => {
   }
 };
 
-const writeLastSeenMap = (m: Record<string, string>) => {
+const writeLastSeenMapLocal = (m: Record<string, string>) => {
   try {
-    localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(m));
+    localStorage.setItem(LAST_SEEN_LS_KEY, JSON.stringify(m));
   } catch {}
+};
+
+// ✅ helper: fetch JSON com timeout (não quebra build)
+const apiFetchJson = async <T,>(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = 12000
+): Promise<{ ok: boolean; status: number; data: T | null; text: string }> => {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: ctrl.signal,
+      headers: {
+        ...(init?.headers || {}),
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const status = res.status;
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { ok: false, status, data: null, text };
+    }
+
+    const text = await res.text().catch(() => '');
+    const data = (text ? (JSON.parse(text) as T) : null) as T | null;
+    return { ok: true, status, data, text: '' };
+  } catch (e: any) {
+    return { ok: false, status: 0, data: null, text: e?.message || 'Falha de rede' };
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -168,30 +215,57 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [hoursTarget, setHoursTarget] = useState<MaintenanceRequest | null>(null);
   const [hoursValue, setHoursValue] = useState<string>('3');
 
-  // ✅ Extra orders
+  // ✅ Extra orders (UNIVERSAL via API + fallback local)
   const [extraOrders, setExtraOrders] = useState<ExtraOrder[]>([]);
   const [extraSearch, setExtraSearch] = useState('');
 
-  // ✅ concierge “não lidas”
+  // ✅ concierge “não lidas” (UNIVERSAL via API + fallback local)
   const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>({});
 
   // ✅ AGENDA (modal ficha do cliente)
   const [agendaOpen, setAgendaOpen] = useState(false);
   const [agendaUser, setAgendaUser] = useState<any | null>(null);
 
-  useEffect(() => {
-    setExtraOrders(readExtraOrdersFromLocal());
-    setLastSeenMap(readLastSeenMap());
+  const didInitRef = useRef(false);
 
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+
+    // 1) Carrega UNIVERSAL (API). Se falhar, usa localStorage.
+    (async () => {
+      // Extras
+      const ex = await apiFetchJson<{ orders: any[] }>('/api/admin/extra-orders', { method: 'GET' });
+      if (ex.ok && ex.data?.orders) {
+        const normalized = normalizeExtraOrders(ex.data.orders);
+        setExtraOrders(normalized);
+        writeExtraOrdersToLocal(normalized); // cache
+      } else {
+        setExtraOrders(readExtraOrdersFromLocal());
+      }
+
+      // Last seen concierge
+      const ls = await apiFetchJson<{ lastSeenMap: Record<string, string> }>(
+        '/api/admin/concierge/last-seen',
+        { method: 'GET' }
+      );
+      if (ls.ok && ls.data?.lastSeenMap) {
+        setLastSeenMap(ls.data.lastSeenMap || {});
+        writeLastSeenMapLocal(ls.data.lastSeenMap || {}); // cache
+      } else {
+        setLastSeenMap(readLastSeenMapLocal());
+      }
+    })();
+
+    // 2) Sync entre abas (apenas cache)
     const onStorage = (e: StorageEvent) => {
-      if (e.key === 'zeloo_extra_orders') setExtraOrders(readExtraOrdersFromLocal());
-      if (e.key === LAST_SEEN_KEY) setLastSeenMap(readLastSeenMap());
+      if (e.key === EXTRA_ORDERS_LS_KEY) setExtraOrders(readExtraOrdersFromLocal());
+      if (e.key === LAST_SEEN_LS_KEY) setLastSeenMap(readLastSeenMapLocal());
     };
 
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
-
   const stats = useMemo(
     () => ({
       totalPaid: (users || []).filter((u: any) => u?.paymentStatus === 'PAID').length,
@@ -311,13 +385,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return (Object.values(unreadCountByUser) as number[]).reduce((a, b) => a + b, 0);
   }, [unreadCountByUser]);
 
-  const markConversationAsSeen = (userId: string) => {
+  const markConversationAsSeen = async (userId: string) => {
     const lastTime = getLastUserMessageTime(userId);
     if (!lastTime) return;
 
     const next = { ...lastSeenMap, [userId]: lastTime };
     setLastSeenMap(next);
-    writeLastSeenMap(next);
+    writeLastSeenMapLocal(next); // cache local
+
+    // ✅ Universal: grava no backend (Supabase via API)
+    await apiFetchJson('/api/admin/concierge/last-seen', {
+      method: 'POST',
+      body: JSON.stringify({ userId, lastSeen: lastTime }),
+    });
   };
 
   const renderPaymentBadge = (u: any) => {
@@ -343,30 +423,43 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
 
-  // ✅ RESET MENSAL (chama sua API)
+  // ✅ RESET MENSAL (robusto: tenta endpoints/payloads diferentes)
   const resetMonthlyForUser = async (userId: string) => {
+    const ok = window.confirm(
+      'Resetar contador mensal desse cliente?\n\nIsso serve para TESTE (deixar como se ele tivesse 0 chamados usados no mês).'
+    );
+    if (!ok) return;
+
     try {
-      const ok = confirm(
-        'Resetar contador mensal desse cliente?\n\nIsso serve para TESTE (deixar como se ele tivesse 0 chamados usados no mês).'
-      );
-      if (!ok) return;
+      const endpoints = ['/api/reset-monthly-usage', '/api/reset-monthly'];
+      let lastStatus = 0;
+      let lastBody = '';
 
-      const res = await fetch('/api/reset-monthly-usage', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ user_id: userId }), // ✅ aqui é user_id
-      });
+      for (const url of endpoints) {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, user_id: userId }),
+        });
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        alert(`Falha no reset mensal.\n\nStatus: ${res.status}\n${txt || ''}`);
+        lastStatus = res.status;
+
+        if (!res.ok) {
+          lastBody = await res.text().catch(() => '');
+          continue;
+        }
+
+        const json = await res.json().catch(() => null);
+
+        alert(
+          `✅ Reset mensal aplicado!\n` +
+            `Movidos: ${json?.moved ?? '-'} chamados.\n\n` +
+            `Agora faça logout/login no usuário de teste e tente abrir chamados novamente.`
+        );
         return;
       }
 
-      const json = await res.json().catch(() => null);
-      alert(
-        `✅ Reset mensal aplicado!\nMovidos: ${json?.moved ?? '-'} chamados.\n\nAgora faça logout/login no usuário de teste e tente abrir chamados novamente.`
-      );
+      alert(`Falha no reset mensal.\n\nStatus: ${lastStatus}\n${lastBody || 'Verifique os logs da Vercel.'}`);
     } catch (e: any) {
       alert(`Erro no reset mensal: ${e?.message || 'Erro desconhecido'}`);
     }
@@ -433,7 +526,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setHoursValue('3');
     alert('Status atualizado: CONCLUÍDO ✅');
   };
-
   const filteredExtraOrders = useMemo(() => {
     const q = extraSearch.trim().toLowerCase();
     if (!q) return extraOrders;
@@ -457,12 +549,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return { pending, paid, revenue };
   }, [filteredExtraOrders]);
 
-  const setExtraOrderStatus = (id: string, status: ExtraOrderStatus) => {
+  // ✅ Universal: atualiza status no backend + cache local
+  const setExtraOrderStatus = async (id: string, status: ExtraOrderStatus) => {
     const next = extraOrders.map((o) => (o.id === id ? { ...o, status } : o));
     setExtraOrders(next);
-    try {
-      localStorage.setItem('zeloo_extra_orders', JSON.stringify(next));
-    } catch {}
+    writeExtraOrdersToLocal(next); // cache local
+
+    // tenta gravar universal
+    const r = await apiFetchJson('/api/admin/extra-orders/status', {
+      method: 'POST',
+      body: JSON.stringify({ id, status }),
+    });
+
+    if (!r.ok) {
+      // não quebra o painel — só avisa
+      console.warn('Falha ao salvar status do extra no backend:', r.status, r.text);
+    }
   };
 
   const RequestActions: React.FC<{ req: MaintenanceRequest }> = ({ req }) => {
@@ -491,7 +593,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             <button
               onClick={() => {
-                // abre agenda do cliente direto daqui
                 const u = (users || []).find((x: any) => String(x?.id) === String((req as any)?.userId));
                 if (u) openClientCard(u);
                 else alert('Não encontrei dados do cliente na Base de Assinantes.');
@@ -528,7 +629,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {canAct && (
           <button
             onClick={() => {
-              const ok = confirm('Deseja cancelar este chamado?');
+              const ok = window.confirm('Deseja cancelar este chamado?');
               if (ok) onUpdateRequestStatus(req.id, ServiceStatus.CANCELLED);
             }}
             className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
@@ -637,7 +738,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
         )}
-
         {activeTab === 'FINANCIAL' && (
           <div className="animate-in slide-in-from-right-10 space-y-8">
             <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Validar Pagamentos</h2>
@@ -769,7 +869,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <button
                   onClick={() => {
-                    const ok = confirm(
+                    const ok = window.confirm(
                       'Deseja aplicar a verificação de arquivamento?\n\n✅ Chamados serão arquivados automaticamente quando couber.\n❌ Nada será apagado.'
                     );
                     if (ok) onClearOldCompletedRequests();
@@ -1214,7 +1314,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       <button
                         onClick={() => {
-                          const ok = confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
+                          const ok = window.confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
                           if (ok) onDeleteUser(u.id);
                         }}
                         className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
@@ -1296,7 +1396,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                           <button
                             onClick={() => {
-                              const ok = confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
+                              const ok = window.confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
                               if (ok) onDeleteUser(u.id);
                             }}
                             className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
@@ -1326,7 +1426,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="flex items-end justify-between gap-6 flex-wrap">
               <div>
                 <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Atendimentos Extras</h2>
-                <p className="text-slate-500 font-semibold text-sm mt-2">Pedidos registrados localmente (por enquanto, sem gateway).</p>
+                <p className="text-slate-500 font-semibold text-sm mt-2">
+                  Pedidos UNIVERSAIS (via API/Supabase). Se a API falhar, usa cache local.
+                </p>
               </div>
 
               <div className="w-full md:w-[420px]">
@@ -1450,7 +1552,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-              Chave usada: <span className="font-mono">zeloo_extra_orders</span> (localStorage)
+              Cache local usado: <span className="font-mono">{EXTRA_ORDERS_LS_KEY}</span> (somente fallback)
             </div>
           </div>
         )}
