@@ -126,15 +126,7 @@ const mapRequestRowToRequest = (row: any): MaintenanceRequest => {
     userName: String(row.user_name ?? row.userName ?? 'Cliente'),
     description: String(row.description ?? ''),
     isUrgent: Boolean(row.is_urgent ?? row.isUrgent ?? false),
-    status: (() => {
-  const raw = String(row.status ?? ServiceStatus.PENDING).toUpperCase();
-  if (raw === 'PENDING') return ServiceStatus.PENDING;
-  if (raw === 'SCHEDULED') return ServiceStatus.SCHEDULED;
-  if (raw === 'COMPLETED') return ServiceStatus.COMPLETED;
-  if (raw === 'CANCELLED') return ServiceStatus.CANCELLED;
-  return ServiceStatus.PENDING;
-})(),
-
+    
     createdAt: row.created_at
       ? new Date(row.created_at).toLocaleDateString('pt-BR')
       : (row.createdAt ?? new Date().toLocaleDateString('pt-BR')),
@@ -895,8 +887,18 @@ const App: React.FC = () => {
                         p.map((r) => ((r as any).id === rid ? ({ ...(r as any), status: ServiceStatus.SCHEDULED } as any) : r))
                       );
 
-                      const { error } = await supabase.from('requests').update({ status: ServiceStatus.SCHEDULED }).eq('id', rid);
-                      if (error) console.warn('Falha ao atualizar status (SCHEDULED) no Supabase:', error);
+                      const resp = await fetch('/api/update-request', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ id: rid, status: 'SCHEDULED' }),
+});
+
+const out = await resp.json();
+
+if (!resp.ok) {
+  console.warn('Falha ao atualizar status (SCHEDULED) via API:', out);
+}
+
                     }}
                     onBuyExtraVisits={(uid, q) =>
                       setRegisteredUsers((p) =>
@@ -964,8 +966,23 @@ const App: React.FC = () => {
                     if (status === ServiceStatus.COMPLETED) payload.completed_at = new Date().toISOString();
                     if (status === ServiceStatus.CANCELLED) payload.cancelled_at = new Date().toISOString();
 
-                    const { error } = await supabase.from('requests').update(payload).eq('id', id);
-                    if (error) console.warn('Falha ao atualizar request no Supabase:', error);
+                    
+                    const resp = await fetch('/api/update-request', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    id,
+    status,
+    visit_cost: typeof cost === 'number' ? cost : undefined,
+  }),
+});
+
+const out = await resp.json();
+
+if (!resp.ok) {
+  console.warn('Falha ao atualizar request via API:', out);
+}
+
                   }}
                   onLogout={() => {
                     setIsSuperUser(false);
