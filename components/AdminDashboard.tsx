@@ -59,21 +59,6 @@ const safeText = (v: any, fallback = '') => {
   return s ? s : fallback;
 };
 
-// ✅ Normaliza status vindo do Supabase / enum / string (resolve sumiço dos botões)
-const normalizeStatus = (s: any): 'PENDING' | 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' => {
-  const raw = String(s ?? '').trim().toUpperCase();
-
-  if (raw.includes('PEND')) return 'PENDING';
-  if (raw.includes('SCHED') || raw.includes('AGEND')) return 'SCHEDULED';
-  if (raw.includes('COMP') || raw.includes('CONCL')) return 'COMPLETED';
-  if (raw.includes('CANC') || raw.includes('CANCEL')) return 'CANCELLED';
-
-  return 'PENDING';
-};
-
-const isStatus = (req: MaintenanceRequest, wanted: 'PENDING' | 'SCHEDULED' | 'COMPLETED' | 'CANCELLED') =>
-  normalizeStatus((req as any).status) === wanted;
-
 const readExtraOrdersFromLocal = (): ExtraOrder[] => {
   try {
     const raw = localStorage.getItem('zeloo_extra_orders');
@@ -152,7 +137,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAdminReply,
   onUpdateUserStatus,
 }) => {
-  // evita warning de “unused props”
+  // evita warning de “unused props” caso ESLint seja chato
   void profile;
   void setProfile;
   void branding;
@@ -164,6 +149,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [clientSearch, setClientSearch] = useState('');
   const [requestStatusFilter, setRequestStatusFilter] = useState<ServiceStatus | 'ALL'>('ALL');
   const [requestArchiveView, setRequestArchiveView] = useState<ArchiveView>('ACTIVE');
+
+  // ✅ filtro por cliente (para a Agenda)
+  const [requestUserFilterId, setRequestUserFilterId] = useState<string>('');
 
   // ✅ Concierge
   const [conciergeSearch, setConciergeSearch] = useState('');
@@ -187,9 +175,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // ✅ concierge “não lidas”
   const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>({});
 
-  // ✅ Modal Ficha do Cliente (AGENDA)
-  const [clientModalOpen, setClientModalOpen] = useState(false);
-  const [clientModalUser, setClientModalUser] = useState<any>(null);
+  // ✅ AGENDA (modal ficha do cliente)
+  const [agendaOpen, setAgendaOpen] = useState(false);
+  const [agendaUser, setAgendaUser] = useState<any | null>(null);
 
   useEffect(() => {
     setExtraOrders(readExtraOrdersFromLocal());
@@ -208,7 +196,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     () => ({
       totalPaid: (users || []).filter((u: any) => u?.paymentStatus === 'PAID').length,
       awaiting: (users || []).filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL').length,
-      pendingReq: (requests || []).filter((r: any) => normalizeStatus(r?.status) === 'PENDING' && r?.archived !== true).length,
+      pendingReq: (requests || []).filter((r) => r.status === ServiceStatus.PENDING).length,
     }),
     [users, requests]
   );
@@ -228,21 +216,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   }, [users, clientSearch]);
 
-  // ✅ Corrigido: filtro de requests respeita status normalizado
   const filteredRequests = useMemo(() => {
-    const base = (requests || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const base = (requests || [])
+      .slice()
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
     const byArchive = base.filter((r) => {
-      const isArchived = (r as any).archived === true;
+      const isArchived = r.archived === true;
       return requestArchiveView === 'ARCHIVED' ? isArchived : !isArchived;
     });
 
-    return byArchive.filter((r) => {
-      if (requestStatusFilter === 'ALL') return true;
-      const wanted = normalizeStatus(requestStatusFilter);
-      return normalizeStatus((r as any).status) === wanted;
-    });
-  }, [requests, requestArchiveView, requestStatusFilter]);
+    const byStatus = byArchive.filter((r) => (requestStatusFilter === 'ALL' ? true : r.status === requestStatusFilter));
+
+    const byUser =
+      requestUserFilterId.trim()
+        ? byStatus.filter((r: any) => String((r as any).userId || '') === String(requestUserFilterId))
+        : byStatus;
+
+    return byUser;
+  }, [requests, requestArchiveView, requestStatusFilter, requestUserFilterId]);
 
   const conciergeUsers = useMemo(() => {
     const q = conciergeSearch.trim().toLowerCase();
@@ -353,36 +345,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // ✅ RESET MENSAL (chama sua API)
   const resetMonthlyForUser = async (userId: string) => {
-  try {
-    const ok = confirm(
-      'Resetar contador mensal desse cliente?\n\nIsso serve para TESTE (deixar como se ele tivesse 0 chamados usados no mês).'
-    );
-    if (!ok) return;
+    try {
+      const ok = confirm(
+        'Resetar contador mensal desse cliente?\n\nIsso serve para TESTE (deixar como se ele tivesse 0 chamados usados no mês).'
+      );
+      if (!ok) return;
 
-    const res = await fetch('/api/reset-monthly-usage', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }), // ✅ aqui é user_id
-    });
+      const res = await fetch('/api/reset-monthly-usage', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }), // ✅ aqui é user_id
+      });
 
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      alert(`Falha no reset mensal.\n\nStatus: ${res.status}\n${txt || ''}`);
-      return;
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        alert(`Falha no reset mensal.\n\nStatus: ${res.status}\n${txt || ''}`);
+        return;
+      }
+
+      const json = await res.json().catch(() => null);
+      alert(
+        `✅ Reset mensal aplicado!\nMovidos: ${json?.moved ?? '-'} chamados.\n\nAgora faça logout/login no usuário de teste e tente abrir chamados novamente.`
+      );
+    } catch (e: any) {
+      alert(`Erro no reset mensal: ${e?.message || 'Erro desconhecido'}`);
     }
-
-    const json = await res.json().catch(() => null);
-    alert(`✅ Reset mensal aplicado!\nMovidos: ${json?.moved ?? '—'} chamados.\n\nAgora faça logout/login no usuário de teste e tente abrir chamados novamente.`);
-  } catch (e: any) {
-    alert(`Erro no reset mensal: ${e?.message || 'Erro desconhecido'}`);
-  }
-};
-
+  };
 
   // ✅ AGENDA: abrir ficha do cliente
   const openClientCard = (u: any) => {
-    setClientModalUser(u);
-    setClientModalOpen(true);
+    setAgendaUser(u);
+    setAgendaOpen(true);
+  };
+
+  const closeClientCard = () => {
+    setAgendaOpen(false);
+    setAgendaUser(null);
   };
 
   // ✅ Responder modal handlers
@@ -467,16 +465,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch {}
   };
 
-  // ✅ BOTÕES DE AÇÃO (AGENDAR/CONCLUIR/CANCELAR) SEM SUMIR
   const RequestActions: React.FC<{ req: MaintenanceRequest }> = ({ req }) => {
-    const archived = (req as any).archived === true;
-    const st = normalizeStatus((req as any).status);
-
-    const canAct = !archived && st !== 'COMPLETED' && st !== 'CANCELLED';
+    const canAct =
+      req.archived !== true &&
+      req.status !== ServiceStatus.COMPLETED &&
+      req.status !== ServiceStatus.CANCELLED;
 
     return (
       <div className="flex gap-3 flex-wrap">
-        {st === 'PENDING' && !archived && (
+        {req.status === ServiceStatus.PENDING && req.archived !== true && (
           <>
             <button
               onClick={() => openReplyModal(req)}
@@ -486,28 +483,53 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
 
             <button
-              onClick={() => onUpdateRequestStatus(req.id, ServiceStatus.SCHEDULED as any)}
+              onClick={() => onUpdateRequestStatus(req.id, ServiceStatus.SCHEDULED)}
               className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all"
             >
               Agendar
             </button>
+
+            <button
+              onClick={() => {
+                // abre agenda do cliente direto daqui
+                const u = (users || []).find((x: any) => String(x?.id) === String((req as any)?.userId));
+                if (u) openClientCard(u);
+                else alert('Não encontrei dados do cliente na Base de Assinantes.');
+              }}
+              className="px-6 py-3 bg-white border border-slate-200 text-slate-900 rounded-xl text-[9px] font-black uppercase hover:bg-slate-50 transition-all"
+            >
+              Agenda
+            </button>
           </>
         )}
 
-        {st === 'SCHEDULED' && !archived && (
-          <button
-            onClick={() => openHoursModal(req)}
-            className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-700 transition-all"
-          >
-            Concluir (Horas)
-          </button>
+        {req.status === ServiceStatus.SCHEDULED && req.archived !== true && (
+          <>
+            <button
+              onClick={() => openHoursModal(req)}
+              className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-700 transition-all"
+            >
+              Concluir (Horas)
+            </button>
+
+            <button
+              onClick={() => {
+                const u = (users || []).find((x: any) => String(x?.id) === String((req as any)?.userId));
+                if (u) openClientCard(u);
+                else alert('Não encontrei dados do cliente na Base de Assinantes.');
+              }}
+              className="px-6 py-3 bg-white border border-slate-200 text-slate-900 rounded-xl text-[9px] font-black uppercase hover:bg-slate-50 transition-all"
+            >
+              Agenda
+            </button>
+          </>
         )}
 
         {canAct && (
           <button
             onClick={() => {
               const ok = confirm('Deseja cancelar este chamado?');
-              if (ok) onUpdateRequestStatus(req.id, ServiceStatus.CANCELLED as any);
+              if (ok) onUpdateRequestStatus(req.id, ServiceStatus.CANCELLED);
             }}
             className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
           >
@@ -518,6 +540,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
 
+  const formatAddress = (u: any) => {
+    const parts = [
+      safeText(u?.address),
+      safeText(u?.number),
+      safeText(u?.neighborhood),
+      safeText(u?.city),
+      safeText(u?.state),
+      safeText(u?.zip),
+    ].filter(Boolean);
+    const line = parts.join(', ');
+    const comp = safeText(u?.complement);
+    return comp ? `${line}\n${comp}` : line;
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 overflow-hidden text-slate-900 font-sans">
       <aside className="w-full md:w-80 bg-slate-950 text-white p-8 md:p-10 flex flex-col shrink-0 shadow-2xl z-[60]">
@@ -526,22 +562,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             Z
           </div>
           <span className="text-2xl font-black uppercase tracking-tighter">Zeloo Ops</span>
-        </div>
-
-        {/* ✅ Atalhos rápidos */}
-        <div className="mb-6 grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setActiveTab('CLIENTS')}
-            className="py-4 rounded-2xl bg-white/5 hover:bg-white/10 transition-all text-[10px] font-black uppercase tracking-widest"
-          >
-            📅 Agenda
-          </button>
-          <button
-            onClick={() => setActiveTab('REQUESTS')}
-            className="py-4 rounded-2xl bg-white/5 hover:bg-white/10 transition-all text-[10px] font-black uppercase tracking-widest"
-          >
-            🔧 O.S
-          </button>
         </div>
 
         <nav className="flex-grow space-y-3">
@@ -611,21 +631,73 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="font-black">{requests?.length ?? 0}</span> chamados,{' '}
                 <span className="font-black">{chatMessages?.length ?? 0}</span> mensagens.
               </p>
+              <p className="text-[11px] font-bold mt-2">
+                Se “Usuários” e “Chamados” estiverem vindo 0 aqui, o problema costuma estar no App.tsx (carregamento do Supabase).
+              </p>
+            </div>
+          </div>
+        )}
 
-              <div className="mt-6 flex gap-3 flex-wrap">
-                <button
-                  onClick={() => setActiveTab('CLIENTS')}
-                  className="px-8 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
-                >
-                  📅 Abrir Agenda
-                </button>
-                <button
-                  onClick={() => setActiveTab('REQUESTS')}
-                  className="px-8 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
-                >
-                  🔧 Ver O.S
-                </button>
-              </div>
+        {activeTab === 'FINANCIAL' && (
+          <div className="animate-in slide-in-from-right-10 space-y-8">
+            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Validar Pagamentos</h2>
+
+            <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 shadow-xl overflow-x-auto">
+              <table className="w-full text-left min-w-[900px]">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Assinante</th>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Plano / Valor</th>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Auditoria</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {(users || [])
+                    .filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL')
+                    .map((u: any) => (
+                      <tr key={u.id}>
+                        <td className="px-8 py-8">
+                          <p className="font-bold text-slate-900 text-lg">{u.name}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">{u.email}</p>
+                        </td>
+                        <td className="px-8 py-8">
+                          <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">{u.planName}</span>
+                          {u.paymentProofUrl && (
+                            <button
+                              onClick={() => setViewingProof(u.paymentProofUrl)}
+                              className="block mt-2 text-emerald-500 text-[9px] font-black uppercase underline"
+                            >
+                              Ver Comprovante
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-8 py-8">
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => onHandlePaymentAction(u.id, 'APPROVE')}
+                              className="bg-emerald-500 text-white px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-all"
+                            >
+                              Aprovar
+                            </button>
+                            <button
+                              onClick={() => onHandlePaymentAction(u.id, 'REJECT')}
+                              className="bg-red-50 text-red-500 px-6 py-3 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
+                            >
+                              Recusar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  {(users || []).filter((u: any) => u?.paymentStatus === 'AWAITING_APPROVAL').length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-8 py-20 text-center text-slate-300 font-black uppercase text-xs">
+                        Nenhum pagamento em auditoria
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -638,6 +710,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <p className="text-slate-500 font-semibold text-sm mt-2">
                   Fluxo: <span className="font-black">Pendente → Agendado → Concluído</span>
                 </p>
+
+                {requestUserFilterId ? (
+                  <div className="mt-4 flex items-center gap-3 flex-wrap">
+                    <span className="px-4 py-2 rounded-2xl bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest">
+                      Filtrando por cliente: {requestUserFilterId}
+                    </span>
+                    <button
+                      onClick={() => setRequestUserFilterId('')}
+                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-900 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+                    >
+                      Limpar filtro
+                    </button>
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex gap-3 flex-wrap items-end w-full md:w-auto">
@@ -711,22 +797,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <p className="text-[10px] text-slate-400 font-mono mt-1">ID: {req.id}</p>
                       </div>
                       <div className="shrink-0">
-                        {isStatus(req, 'PENDING') && (
+                        {req.status === ServiceStatus.PENDING && (
                           <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-[9px] font-black uppercase">
                             Recebido
                           </span>
                         )}
-                        {isStatus(req, 'SCHEDULED') && (
+                        {req.status === ServiceStatus.SCHEDULED && (
                           <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase">
                             Agendado
                           </span>
                         )}
-                        {isStatus(req, 'COMPLETED') && (
+                        {req.status === ServiceStatus.COMPLETED && (
                           <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase">
                             Concluído
                           </span>
                         )}
-                        {isStatus(req, 'CANCELLED') && (
+                        {req.status === ServiceStatus.CANCELLED && (
                           <span className="px-3 py-1 rounded-full bg-red-50 text-red-700 text-[9px] font-black uppercase">
                             Cancelado
                           </span>
@@ -738,20 +824,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       {req.description}
                     </div>
 
-                    {(req as any).isUrgent && <div className="text-[10px] font-black text-red-500 uppercase">🚨 EMERGÊNCIA</div>}
+                    {req.isUrgent && <div className="text-[10px] font-black text-red-500 uppercase">🚨 EMERGÊNCIA</div>}
 
-                    {(req as any).adminReply && (
+                    {req.adminReply && (
                       <div className="text-[12px] text-slate-600">
-                        <span className="font-black uppercase text-slate-400">Admin:</span> {(req as any).adminReply}
+                        <span className="font-black uppercase text-slate-400">Admin:</span> {req.adminReply}
                       </div>
                     )}
 
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black text-slate-600 uppercase">
-                        {typeof (req as any).visitCost === 'number' ? `${(req as any).visitCost}h` : '—'}
+                        {typeof req.visitCost === 'number' ? `${req.visitCost}h` : '—'}
                       </span>
 
-                      {(req as any).archived === true && (
+                      {req.archived === true && (
                         <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black uppercase">
                           Arquivado
                         </span>
@@ -785,7 +871,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <p className="text-[10px] text-slate-400 uppercase">{req.createdAt}</p>
                         <p className="text-[10px] text-slate-400 font-mono mt-2">ID: {req.id}</p>
 
-                        {(req as any).archived === true && (
+                        {req.archived === true && (
                           <div className="mt-2">
                             <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black uppercase">
                               Arquivado
@@ -796,33 +882,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       <td className="px-8 py-6">
                         <p className="text-sm font-medium text-slate-700 max-w-sm">{req.description}</p>
-                        {(req as any).isUrgent && (
+                        {req.isUrgent && (
                           <span className="text-[8px] font-black text-red-500 uppercase">🚨 EMERGÊNCIA</span>
                         )}
-                        {(req as any).adminReply && (
+                        {req.adminReply && (
                           <p className="text-[11px] text-slate-500 mt-3">
-                            <span className="font-black uppercase text-slate-400">Admin:</span> {(req as any).adminReply}
+                            <span className="font-black uppercase text-slate-400">Admin:</span> {req.adminReply}
                           </p>
                         )}
                       </td>
 
                       <td className="px-8 py-6">
-                        {isStatus(req, 'PENDING') && (
+                        {req.status === ServiceStatus.PENDING && (
                           <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-[9px] font-black uppercase">
                             Recebido
                           </span>
                         )}
-                        {isStatus(req, 'SCHEDULED') && (
+                        {req.status === ServiceStatus.SCHEDULED && (
                           <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase">
                             Agendado
                           </span>
                         )}
-                        {isStatus(req, 'COMPLETED') && (
+                        {req.status === ServiceStatus.COMPLETED && (
                           <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase">
                             Concluído
                           </span>
                         )}
-                        {isStatus(req, 'CANCELLED') && (
+                        {req.status === ServiceStatus.CANCELLED && (
                           <span className="px-3 py-1 rounded-full bg-red-50 text-red-700 text-[9px] font-black uppercase">
                             Cancelado
                           </span>
@@ -831,7 +917,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       <td className="px-8 py-6">
                         <span className="text-[10px] font-black text-slate-600 uppercase">
-                          {typeof (req as any).visitCost === 'number' ? `${(req as any).visitCost}h` : '—'}
+                          {typeof req.visitCost === 'number' ? `${req.visitCost}h` : '—'}
                         </span>
                       </td>
 
@@ -854,10 +940,205 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
+        {activeTab === 'CONCIERGE' && (
+          <div className="animate-in slide-in-from-right-10 space-y-8">
+            <div className="flex items-end justify-between gap-6 flex-wrap">
+              <div>
+                <h2 className="text-2xl font-black text-slate-900 uppercase">Concierge — Chat Admin</h2>
+                <p className="text-slate-500 font-semibold text-sm mt-2">Conversas por usuário (triagem e dúvidas rápidas).</p>
+              </div>
+
+              <div className="w-full md:w-[420px]">
+                <label className="block text-[10px] font-black uppercase text-slate-400 ml-1 mb-2">
+                  Buscar conversa (nome, id, última mensagem)
+                </label>
+                <input
+                  value={conciergeSearch}
+                  onChange={(e) => setConciergeSearch(e.target.value)}
+                  placeholder="Ex.: Maria, user-..., 'vazamento'..."
+                  className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none focus:border-indigo-600 transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden">
+                <div className="px-8 py-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    Conversas ({conciergeUsers.length})
+                  </p>
+                  {totalUnreadConcierge > 0 ? (
+                    <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black">
+                      {totalUnreadConcierge} novas
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="divide-y divide-slate-50 max-h-[650px] overflow-y-auto">
+                  {conciergeUsers.length === 0 ? (
+                    <div className="px-8 py-16 text-center text-slate-300 font-black uppercase text-xs">
+                      Nenhuma conversa ainda
+                    </div>
+                  ) : (
+                    conciergeUsers.map((u) => {
+                      const isSelected = selectedChatUserId === u.userId;
+                      const unread = unreadCountByUser[u.userId] === 1;
+
+                      return (
+                        <button
+                          key={u.userId}
+                          onClick={() => {
+                            setSelectedChatUserId(u.userId);
+                            markConversationAsSeen(u.userId);
+                          }}
+                          className={`w-full text-left px-8 py-6 transition-all ${
+                            isSelected ? 'bg-indigo-600 text-white' : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p
+                                className={`font-black uppercase tracking-widest text-[10px] ${
+                                  isSelected ? 'text-white' : 'text-slate-900'
+                                }`}
+                              >
+                                {u.userName}
+                              </p>
+                              <p
+                                className={`text-[10px] font-mono mt-1 ${
+                                  isSelected ? 'text-indigo-100' : 'text-slate-400'
+                                }`}
+                              >
+                                {u.userId}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {unread ? (
+                                <span className={`bg-red-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black`}>
+                                  1
+                                </span>
+                              ) : null}
+                              <span
+                                className={`text-[9px] font-black uppercase ${
+                                  isSelected ? 'text-indigo-100' : 'text-slate-400'
+                                }`}
+                              >
+                                {u.lastTime || ''}
+                              </span>
+                            </div>
+                          </div>
+
+                          <p className={`mt-3 text-sm font-semibold line-clamp-2 ${isSelected ? 'text-white' : 'text-slate-600'}`}>
+                            {u.lastText || '—'}
+                          </p>
+
+                          <p className={`mt-2 text-[9px] font-black uppercase ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                            {u.count} msg
+                          </p>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="lg:col-span-2 bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden flex flex-col min-h-[650px]">
+                <div className="px-10 py-8 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                  {selectedChatUserId ? (
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Conversando com</p>
+                      <p className="text-xl font-black text-slate-900">{selectedUserName}</p>
+                      <p className="text-[10px] font-mono text-slate-400 mt-1">{selectedChatUserId}</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-xl font-black text-slate-900">Selecione um usuário</p>
+                      <p className="text-slate-500 font-semibold text-sm mt-2">
+                        Clique em uma conversa à esquerda para abrir o chat.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 p-6 md:p-10 overflow-y-auto space-y-4 bg-white">
+                  {!selectedChatUserId ? (
+                    <div className="h-full flex items-center justify-center text-slate-300 font-black uppercase text-xs">
+                      Nenhuma conversa selecionada
+                    </div>
+                  ) : selectedConversation.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-slate-300 font-black uppercase text-xs">
+                      Sem mensagens ainda
+                    </div>
+                  ) : (
+                    selectedConversation.map((msg) => (
+                      <div key={msg.id} className={`flex ${msg.sender === 'ADMIN' ? 'justify-end' : 'justify-start'}`}>
+                        <div
+                          className={`max-w-[85%] p-5 md:p-6 rounded-[2rem] text-sm leading-relaxed break-words whitespace-pre-wrap ${
+                            msg.sender === 'ADMIN'
+                              ? 'bg-indigo-600 text-white rounded-tr-none shadow-lg'
+                              : 'bg-slate-50 border border-slate-100 text-slate-800 rounded-tl-none font-semibold'
+                          }`}
+                        >
+                          <p>{msg.text}</p>
+                          <span
+                            className={`text-[8px] font-black uppercase mt-2 block ${
+                              msg.sender === 'ADMIN' ? 'text-indigo-100 text-right' : 'text-slate-400'
+                            }`}
+                          >
+                            {msg.timestamp}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="p-6 md:p-8 border-t border-slate-100 bg-white">
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!selectedChatUserId) return;
+
+                      const text = adminChatInput.trim();
+                      if (!text) return;
+
+                      onSendChatMessage(text, 'ADMIN', selectedChatUserId, selectedUserName);
+                      setAdminChatInput('');
+                    }}
+                    className="flex gap-3 md:gap-4"
+                  >
+                    <input
+                      value={adminChatInput}
+                      onChange={(e) => setAdminChatInput(e.target.value)}
+                      placeholder={selectedChatUserId ? 'Escreva a resposta do concierge…' : 'Selecione um usuário para responder'}
+                      disabled={!selectedChatUserId}
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-6 md:px-8 py-4 md:py-5 text-sm font-bold outline-none focus:border-indigo-600 transition-all disabled:opacity-60"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!selectedChatUserId}
+                      className="w-14 h-14 md:w-16 md:h-16 bg-slate-950 text-white rounded-full flex items-center justify-center text-xl shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-60 disabled:hover:scale-100"
+                    >
+                      ➔
+                    </button>
+                  </form>
+
+                  {selectedChatUserId && (
+                    <p className="mt-4 text-[9px] font-black uppercase tracking-widest text-slate-400">
+                      Dica: use o chat para triagem. Atendimento técnico deve virar Chamado.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'CLIENTS' && (
           <div className="animate-in slide-in-from-right-10 space-y-8">
             <div className="flex items-end justify-between gap-6 flex-wrap">
-              <h2 className="text-2xl font-black text-slate-900 uppercase">Agenda — Base de Assinantes</h2>
+              <h2 className="text-2xl font-black text-slate-900 uppercase">Base de Assinantes</h2>
 
               <div className="w-full md:w-[420px]">
                 <label className="block text-[10px] font-black uppercase text-slate-400 ml-1 mb-2">
@@ -870,6 +1151,80 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   onChange={(e) => setClientSearch(e.target.value)}
                 />
               </div>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden space-y-4">
+              {filteredUsers.length === 0 ? (
+                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-10 text-center text-slate-300 font-black uppercase text-xs">
+                  Nenhum assinante encontrado
+                </div>
+              ) : (
+                filteredUsers.map((u: any) => (
+                  <div key={u.id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-black text-slate-900">{u.name}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase">{u.email}</p>
+                        <p className="text-[10px] text-slate-400 font-mono mt-1">ID: {u.id}</p>
+                      </div>
+                      {renderPaymentBadge(u)}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                        {u.planName || '—'}
+                      </span>
+
+                      {Boolean(u.isBlocked) ? (
+                        <span className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-[9px] font-black uppercase">
+                          Bloqueado
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="flex gap-3 flex-wrap pt-2">
+                      <button
+                        onClick={() => openClientCard(u)}
+                        className="px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg transition-all bg-slate-900 text-white hover:bg-slate-950"
+                      >
+                        Agenda
+                      </button>
+
+                      <button
+                        onClick={() => resetMonthlyForUser(u.id)}
+                        className="px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg transition-all bg-indigo-600 text-white hover:bg-indigo-700"
+                      >
+                        Reset mensal
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const isBlocked = Boolean(u.isBlocked);
+                          onUpdateUserStatus(u.id, !isBlocked);
+                        }}
+                        className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg transition-all ${
+                          Boolean(u.isBlocked)
+                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                            : 'bg-amber-500 text-white hover:bg-amber-600'
+                        }`}
+                      >
+                        {Boolean(u.isBlocked) ? 'Desbloquear' : 'Bloquear'}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const ok = confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
+                          if (ok) onDeleteUser(u.id);
+                        }}
+                        className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
             {/* Desktop table */}
@@ -891,6 +1246,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <p className="font-bold text-slate-900 text-lg">{u.name}</p>
                         <p className="text-[10px] text-slate-400 font-bold uppercase">{u.email}</p>
                         <p className="text-[10px] text-slate-400 font-mono mt-2">ID: {u.id}</p>
+
                         {Boolean(u.isBlocked) && (
                           <div className="mt-2">
                             <span className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-[9px] font-black uppercase">
@@ -912,16 +1268,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <div className="flex gap-3 flex-wrap">
                           <button
                             onClick={() => openClientCard(u)}
-                            className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-slate-950 transition-all"
+                            className="px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg transition-all bg-slate-900 text-white hover:bg-slate-950"
                           >
-                            📋 Ficha
+                            Agenda
                           </button>
 
                           <button
                             onClick={() => resetMonthlyForUser(u.id)}
-                            className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all"
+                            className="px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg transition-all bg-indigo-600 text-white hover:bg-indigo-700"
                           >
-                            🔄 Reset mensal
+                            Reset mensal
                           </button>
 
                           <button
@@ -962,157 +1318,216 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </tbody>
               </table>
             </div>
-
-            {/* Mobile cards */}
-            <div className="md:hidden space-y-4">
-              {filteredUsers.length === 0 ? (
-                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-10 text-center text-slate-300 font-black uppercase text-xs">
-                  Nenhum assinante encontrado
-                </div>
-              ) : (
-                filteredUsers.map((u: any) => (
-                  <div key={u.id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-black text-slate-900">{u.name}</p>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase">{u.email}</p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-1">ID: {u.id}</p>
-                      </div>
-                      {renderPaymentBadge(u)}
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">
-                        {u.planName || '—'}
-                      </span>
-
-                      {Boolean(u.isBlocked) ? (
-                        <span className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-[9px] font-black uppercase">
-                          Bloqueado
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <div className="flex gap-3 flex-wrap pt-2">
-                      <button
-                        onClick={() => openClientCard(u)}
-                        className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-slate-950 transition-all"
-                      >
-                        📋 Ficha
-                      </button>
-
-                      <button
-                        onClick={() => resetMonthlyForUser(u.id)}
-                        className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all"
-                      >
-                        🔄 Reset mensal
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          const isBlocked = Boolean(u.isBlocked);
-                          onUpdateUserStatus(u.id, !isBlocked);
-                        }}
-                        className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase shadow-lg transition-all ${
-                          Boolean(u.isBlocked)
-                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                            : 'bg-amber-500 text-white hover:bg-amber-600'
-                        }`}
-                      >
-                        {Boolean(u.isBlocked) ? 'Desbloquear' : 'Bloquear'}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          const ok = confirm(`Tem certeza que deseja excluir o usuário "${u.name}"?\n\nEssa ação não pode ser desfeita.`);
-                          if (ok) onDeleteUser(u.id);
-                        }}
-                        className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
-                      >
-                        Excluir
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
           </div>
         )}
 
-        {/* ⚠️ Mantive as abas FINANCIAL/CONCIERGE/EXTRA_ORDERS como estavam no seu arquivo original.
-            Se quiser, eu também aplico normalizeStatus nelas onde fizer sentido. */}
+        {activeTab === 'EXTRA_ORDERS' && (
+          <div className="animate-in slide-in-from-right-10 space-y-10">
+            <div className="flex items-end justify-between gap-6 flex-wrap">
+              <div>
+                <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Atendimentos Extras</h2>
+                <p className="text-slate-500 font-semibold text-sm mt-2">Pedidos registrados localmente (por enquanto, sem gateway).</p>
+              </div>
+
+              <div className="w-full md:w-[420px]">
+                <label className="block text-[10px] font-black uppercase text-slate-400 ml-1 mb-2">
+                  Buscar por cliente, plano, userId ou pedidoId
+                </label>
+                <input
+                  value={extraSearch}
+                  onChange={(e) => setExtraSearch(e.target.value)}
+                  placeholder="Ex.: Maria, Residencial, user-..., extra-..."
+                  className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none focus:border-indigo-600 transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Pendentes</p>
+                <p className="text-6xl font-black text-amber-500 tracking-tighter">{extraTotals.pending}</p>
+              </div>
+              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Pagos</p>
+                <p className="text-6xl font-black text-emerald-600 tracking-tighter">{extraTotals.paid}</p>
+              </div>
+              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Receita (Pagos)</p>
+                <p className="text-3xl font-black text-indigo-600 tracking-tighter">{brl(extraTotals.revenue)}</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-x-auto">
+              <table className="w-full text-left min-w-[1200px]">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Pedido</th>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Cliente</th>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Qtd</th>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Total</th>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Status</th>
+                    <th className="px-8 py-6 text-[10px] font-black uppercase text-slate-400 tracking-widest">Ações</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-50">
+                  {filteredExtraOrders.map((o) => {
+                    const qty = safeNumber(o.qty, 1);
+                    const unitPrice = safeNumber(o.unitPrice, 0);
+                    const total = safeNumber(o.total, unitPrice * qty);
+
+                    return (
+                      <tr key={o.id}>
+                        <td className="px-8 py-8">
+                          <p className="font-black text-slate-900 text-sm">{o.id}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{o.createdAt}</p>
+                        </td>
+
+                        <td className="px-8 py-8">
+                          <p className="font-bold text-slate-900">{o.userName}</p>
+                          <p className="text-[10px] text-slate-400 font-mono mt-1">{o.userId}</p>
+                          {o.userPlan ? (
+                            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mt-2">{o.userPlan}</p>
+                          ) : null}
+                        </td>
+
+                        <td className="px-8 py-8">
+                          <p className="font-black text-slate-900">{qty}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{brl(unitPrice)} / un</p>
+                        </td>
+
+                        <td className="px-8 py-8">
+                          <p className="font-black text-slate-900">{brl(total)}</p>
+                        </td>
+
+                        <td className="px-8 py-8">
+                          {o.status === 'PENDING' && (
+                            <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-[9px] font-black uppercase">
+                              Pendente
+                            </span>
+                          )}
+                          {o.status === 'PAID' && (
+                            <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase">
+                              Pago
+                            </span>
+                          )}
+                          {o.status === 'CANCELLED' && (
+                            <span className="px-3 py-1 rounded-full bg-red-50 text-red-700 text-[9px] font-black uppercase">
+                              Cancelado
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-8 py-8">
+                          <div className="flex gap-3 flex-wrap">
+                            <button
+                              onClick={() => setExtraOrderStatus(o.id, 'PAID')}
+                              className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-700 transition-all"
+                            >
+                              Marcar Pago
+                            </button>
+                            <button
+                              onClick={() => setExtraOrderStatus(o.id, 'CANCELLED')}
+                              className="px-6 py-3 bg-red-50 text-red-600 rounded-xl text-[9px] font-black uppercase hover:bg-red-100 transition-all"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {filteredExtraOrders.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-8 py-20 text-center text-slate-300 font-black uppercase text-xs">
+                        Nenhum pedido de atendimentos extras encontrado
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              Chave usada: <span className="font-mono">zeloo_extra_orders</span> (localStorage)
+            </div>
+          </div>
+        )}
       </main>
 
-      {/* ✅ MODAL: Ficha do Cliente (Agenda) */}
-      {clientModalOpen && clientModalUser && (
+      {/* ✅ MODAL: AGENDA (ficha do cliente) */}
+      {agendaOpen && agendaUser && (
         <div className="fixed inset-0 z-[240] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm animate-in fade-in" onClick={() => setClientModalOpen(false)} />
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm animate-in fade-in" onClick={closeClientCard} />
           <div className="relative bg-white rounded-[3rem] p-8 md:p-10 max-w-2xl w-full shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start justify-between gap-6 mb-8">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ficha do cliente</p>
-                <h3 className="text-2xl font-black text-slate-900">{clientModalUser?.name || 'Cliente'}</h3>
-                <p className="text-[10px] font-mono text-slate-400 mt-2">{clientModalUser?.id || ''}</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Agenda — Ficha do cliente</p>
+                <h3 className="text-2xl font-black text-slate-900">{agendaUser?.name || 'Cliente'}</h3>
+                <p className="text-[10px] font-mono text-slate-400 mt-2">{agendaUser?.id || ''}</p>
               </div>
 
-              <button onClick={() => setClientModalOpen(false)} className="text-slate-300 hover:text-slate-900 font-black text-3xl" aria-label="Fechar">
+              <button onClick={closeClientCard} className="text-slate-300 hover:text-slate-900 font-black text-3xl" aria-label="Fechar">
                 ×
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                <p className="text-[10px] font-black uppercase text-slate-400">Email</p>
-                <p className="font-bold text-slate-900 mt-1 break-words">{clientModalUser?.email || '—'}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Contato</p>
+                <p className="mt-2 text-sm font-bold text-slate-900 break-words">{agendaUser?.email || '—'}</p>
+                <p className="mt-2 text-sm font-semibold text-slate-700 break-words">{agendaUser?.phone || agendaUser?.telefone || '—'}</p>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                <p className="text-[10px] font-black uppercase text-slate-400">Telefone</p>
-                <p className="font-bold text-slate-900 mt-1 break-words">
-                  {clientModalUser?.phone || clientModalUser?.telefone || '—'}
+              <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Plano / Status</p>
+                <p className="mt-2 text-sm font-black text-indigo-600 uppercase tracking-widest">{agendaUser?.planName || '—'}</p>
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  {renderPaymentBadge(agendaUser)}
+                  {Boolean(agendaUser?.isBlocked) ? (
+                    <span className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-[9px] font-black uppercase">
+                      Bloqueado
+                    </span>
+                  ) : null}
+                </div>
+
+                <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  Extras disponíveis: <span className="text-slate-900">{Number(agendaUser?.extraVisitsPurchased || 0)}</span>
                 </p>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                <p className="text-[10px] font-black uppercase text-slate-400">CPF</p>
-                <p className="font-bold text-slate-900 mt-1 break-words">
-                  {clientModalUser?.cpf || clientModalUser?.document || '—'}
-                </p>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                <p className="text-[10px] font-black uppercase text-slate-400">Plano</p>
-                <p className="font-bold text-slate-900 mt-1 break-words">{clientModalUser?.planName || '—'}</p>
-              </div>
-
-              <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                <p className="text-[10px] font-black uppercase text-slate-400">Endereço</p>
-                <p className="font-bold text-slate-900 mt-1 break-words">
-                  {[
-                    clientModalUser?.address,
-                    clientModalUser?.number,
-                    clientModalUser?.neighborhood,
-                    clientModalUser?.city,
-                    clientModalUser?.state,
-                    clientModalUser?.zip,
-                    clientModalUser?.complement,
-                  ]
-                    .filter(Boolean)
-                    .join(' • ') || '—'}
+              <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-3xl p-6">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Endereço</p>
+                <p className="mt-2 text-sm font-semibold text-slate-800 whitespace-pre-wrap break-words">
+                  {formatAddress(agendaUser) || '—'}
                 </p>
               </div>
             </div>
 
             <div className="mt-8 flex gap-3 flex-wrap justify-end">
               <button
-                onClick={() => resetMonthlyForUser(clientModalUser.id)}
-                className="px-10 py-4 rounded-2xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all"
+                onClick={() => resetMonthlyForUser(agendaUser.id)}
+                className="px-8 py-4 rounded-2xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all"
               >
-                🔄 Reset mensal
+                Reset mensal
               </button>
 
               <button
-                onClick={() => setClientModalOpen(false)}
+                onClick={() => {
+                  setRequestUserFilterId(String(agendaUser.id));
+                  setRequestArchiveView('ACTIVE');
+                  setRequestStatusFilter('ALL');
+                  setActiveTab('REQUESTS');
+                  closeClientCard();
+                }}
+                className="px-8 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
+              >
+                Ver chamados deste cliente
+              </button>
+
+              <button
+                onClick={closeClientCard}
                 className="px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
               >
                 Fechar
@@ -1120,7 +1535,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <p className="mt-6 text-[9px] font-black uppercase tracking-widest text-slate-400">
-              Obs: telefone/CPF só aparecem se existirem no registro do usuário.
+              Obs.: Phone/CPF só aparecem aqui se existirem no seu objeto do usuário (tipos/supabase).
             </p>
           </div>
         </div>
