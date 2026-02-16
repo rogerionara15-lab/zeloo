@@ -569,9 +569,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const RequestActions: React.FC<{ req: MaintenanceRequest }> = ({ req }) => {
   // ✅ normaliza status vindo do Supabase (pending/scheduled/etc -> PENDING/SCHEDULED)
-  const normStatus = (s: any) => String(s ?? '').trim().toUpperCase() as ServiceStatus;
+  const status = (() => {
+  const raw = String((req as any)?.status ?? '').trim().toUpperCase();
 
-  const status = normStatus((req as any)?.status);
+  if (!raw) return ServiceStatus.PENDING;
+
+  if (['PENDING', 'RECEIVED', 'OPEN', 'ABERTO', 'RECEBIDO'].includes(raw))
+    return ServiceStatus.PENDING;
+
+  if (['SCHEDULED', 'AGENDADO'].includes(raw))
+    return ServiceStatus.SCHEDULED;
+
+  if (['COMPLETED', 'DONE', 'CONCLUIDO', 'CONCLUÍDO'].includes(raw))
+    return ServiceStatus.COMPLETED;
+
+  if (['CANCELLED', 'CANCELED', 'CANCELADO'].includes(raw))
+    return ServiceStatus.CANCELLED;
+
+  return ServiceStatus.PENDING;
+})();
+
 
   const canAct =
     req.archived !== true &&
