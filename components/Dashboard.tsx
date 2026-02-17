@@ -867,16 +867,15 @@ const Dashboard: React.FC<DashboardProps> = ({
         )}
       </main>
 
-      {/* MODAL: ATENDIMENTO EXTRA */}
+           {/* MODAL: ATENDIMENTO EXTRA */}
       {showExtraModal && (
-        <div className="fixed inset-0 z-[999] flex items-start justify-center p-4 sm:p-6">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 sm:p-6">
           <div
             className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in"
             onClick={() => (extraPayLoading ? null : setShowExtraModal(false))}
           />
 
           <div className="relative bg-white rounded-[2.5rem] md:rounded-[3.5rem] p-6 md:p-12 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] animate-in zoom-in-95">
-            {/* ... (sem mudanças) ... */}
             <div className="flex justify-between items-start gap-6 mb-8">
               <div>
                 <h3 className="text-3xl font-black text-slate-950 uppercase tracking-tighter">Atendimento extra</h3>
@@ -896,11 +895,110 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
 
-            {/* ... resto do modal igual ao seu arquivo ... */}
-            {/* (mantive sem mexer para não quebrar nada) */}
+            <div className="p-6 md:p-8 rounded-[2.5rem] bg-slate-50 border border-slate-100">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Valor por plano (1 atendimento = até 3h)
+              </p>
+
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white border border-slate-200 rounded-3xl p-6">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Residencial</p>
+                  <p className="text-2xl font-black text-slate-900 mt-2">{brl(extraPriceTable.residential)}</p>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-3xl p-6">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Comercial</p>
+                  <p className="text-2xl font-black text-slate-900 mt-2">{brl(extraPriceTable.commercial)}</p>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-3xl p-6">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Condomínio</p>
+                  <p className="text-2xl font-black text-slate-900 mt-2">{brl(extraPriceTable.condominium)}</p>
+                </div>
+              </div>
+
+              <p className="mt-5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Seu plano atual: <span className="text-indigo-600">{userData.planName}</span>
+              </p>
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="p-6 md:p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Quantidade</p>
+
+                <div className="mt-5 flex items-center gap-3">
+                  <button
+                    onClick={() => setExtraQty((q) => Math.max(1, q - 1))}
+                    className="w-12 h-12 rounded-2xl bg-slate-950 text-white font-black text-xl hover:bg-indigo-600 transition-all disabled:opacity-40"
+                    disabled={extraQty <= 1 || extraPayLoading}
+                  >
+                    −
+                  </button>
+
+                  <select
+                    value={extraQty}
+                    onChange={(e) => setExtraQty(Number(e.target.value))}
+                    disabled={extraPayLoading}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:border-indigo-600 transition-all disabled:opacity-60"
+                  >
+                    {Array.from({ length: 10 }).map((_, i) => {
+                      const v = i + 1;
+                      return (
+                        <option key={v} value={v}>
+                          {v} {v === 1 ? 'atendimento' : 'atendimentos'}
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  <button
+                    onClick={() => setExtraQty((q) => Math.min(10, q + 1))}
+                    className="w-12 h-12 rounded-2xl bg-slate-950 text-white font-black text-xl hover:bg-indigo-600 transition-all disabled:opacity-40"
+                    disabled={extraPayLoading}
+                  >
+                    +
+                  </button>
+                </div>
+
+                <p className="mt-4 text-xs text-slate-500 font-semibold">
+                  Cada atendimento extra cobre até <span className="font-black">3 horas</span>.
+                </p>
+              </div>
+
+              <div className="p-6 md:p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total</p>
+                <p className="text-4xl font-black text-emerald-600 tracking-tighter mt-4">{brl(extraTotal)}</p>
+                <p className="mt-3 text-xs text-slate-500 font-semibold">
+                  Total calculado automaticamente pelo seu plano atual.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-10 flex gap-3 flex-wrap justify-end">
+              <button
+                onClick={() => setShowExtraModal(false)}
+                disabled={extraPayLoading}
+                className="px-8 py-4 rounded-2xl bg-white border border-slate-200 text-slate-800 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+
+              <button
+                onClick={handleExtraCheckout}
+                disabled={extraPayLoading}
+                className="px-10 py-4 rounded-2xl bg-slate-950 text-white text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all active:scale-95 disabled:opacity-60"
+              >
+                {extraPayLoading ? 'Abrindo Mercado Pago...' : 'Continuar para pagamento'}
+              </button>
+            </div>
+
+            <p className="mt-6 text-center text-[9px] font-black text-slate-400 uppercase tracking-widest">
+              Após aprovado, o crédito de extras é liberado automaticamente.
+            </p>
           </div>
         </div>
       )}
+
 
       {/* MODAL: NOVO CHAMADO */}
       {showModal && (
