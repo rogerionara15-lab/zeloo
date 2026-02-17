@@ -773,37 +773,6 @@ if (rs.ok) {
     const comp = safeText(u?.complement);
     return comp ? `${line}\n${comp}` : line;
   };
-const parseDateTime = (s: string): number => {
-  const t = (s || '').trim();
-  if (!t) return 0;
-
-  // ISO ou formatos que o Date entende
-  const iso = Date.parse(t);
-  if (Number.isFinite(iso)) return iso;
-
-  // pt-BR: "dd/mm/aaaa, HH:MM:SS" ou "dd/mm/aaaa HH:MM"
-  const m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:,)?\s*(\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (m) {
-    const dd = Number(m[1]);
-    const mm = Number(m[2]);
-    const yyyy = Number(m[3]);
-    const hh = Number(m[4]);
-    const mi = Number(m[5]);
-    const ss = Number(m[6] || 0);
-    return new Date(yyyy, mm - 1, dd, hh, mi, ss).getTime();
-  }
-
-  return 0;
-};
-
-const getLatestRequestTime = (reqs: any[]): number => {
-  let best = 0;
-  for (const r of reqs || []) {
-    const v = parseDateTime(String(r?.createdAt || ''));
-    if (v > best) best = v;
-  }
-  return best;
-};
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 overflow-hidden text-slate-900 font-sans">
