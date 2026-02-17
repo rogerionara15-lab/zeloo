@@ -176,6 +176,7 @@ const mapUserRowToUser = (row: any): UserRegistration => {
     dueDate: row.due_date ?? row.dueDate ?? 'Ativo',
     extraVisitsPurchased: row.extra_visits_purchased ?? row.extraVisitsPurchased ?? 0,
 
+phone: row.phone,
     address: row.address,
     number: row.number,
     neighborhood: row.neighborhood,
