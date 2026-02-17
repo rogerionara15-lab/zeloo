@@ -432,6 +432,16 @@ const App: React.FC = () => {
     };
 
     hydrate();
+      // ✅ roda uma vez ao abrir o app
+  hydrate();
+
+  // ✅ atualiza universalmente (PC/celular) sem precisar dar refresh
+  const t = setInterval(() => {
+    hydrate();
+  }, 8000);
+
+  return () => clearInterval(t);
+
   }, []);
 
   // Realtime
