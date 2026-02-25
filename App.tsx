@@ -24,7 +24,6 @@ import PrivacyPolicy from './components/PrivacyPolicy';
 import TermsOfUse from './components/TermsOfUse';
 import FAQ from './components/FAQ';
 import ContactConsultant from './components/ContactConsultant';
-import ZelooExpress from './components/ZelooExpress';
 import PosPagamento from './components/PosPagamento';
 import Cancelamento from './components/Cancelamento';
 import FormasPagamento from './components/FormasPagamento';
@@ -329,7 +328,6 @@ const PosExtra: React.FC<{ supabase: any }> = ({ supabase }) => {
 const App: React.FC = () => {
   const [view, setView] = useState<string>('LANDING');
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [showExpress, setShowExpress] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDetails | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [isSuperUser, setIsSuperUser] = useState(false);
@@ -805,22 +803,34 @@ const App: React.FC = () => {
             />
 
             <button
-              onClick={() => setShowExpress(true)}
+              onClick={() => {
+  const msg = `Olá! Vim pelo site da Zeloo ⚡
+
+Você já é assinante? (SIM/NÃO)
+
+✅ Se SIM:
+1) E-mail do cadastro:
+2) Telefone:
+3) Qual problema/serviço?
+4) É urgência? (SIM/NÃO)
+
+🟦 Se NÃO:
+1) Cidade/Bairro:
+2) O que precisa (resumo):
+3) Melhor horário para contato:`;
+
+  window.open(
+    `https://wa.me/5542988670973?text=${encodeURIComponent(msg)}`,
+    "_blank",
+    "noreferrer"
+  );
+}}
               className="fixed bottom-8 right-8 w-16 h-16 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl hover:scale-110 active:scale-95 transition-all z-40 border-4 border-white"
             >
               ⚡
             </button>
 
-            {showExpress && (
-              <ZelooExpress
-                isOpen={showExpress}
-                onClose={() => setShowExpress(false)}
-                lastEstimate={null}
-                onBudgetGenerated={() => {}}
-                isLoggedIn={!!currentUser}
-                onAuthRequired={() => setShowLoginModal(true)}
-              />
-            )}
+            
           </div>
         )}
 
