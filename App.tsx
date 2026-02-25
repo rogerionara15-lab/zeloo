@@ -754,12 +754,22 @@ const App: React.FC = () => {
               branding={branding}
             />
             <Services
-              onConsultCustomized={() => navigateTo('CUSTOM_CONSULTATION')}
-              onServiceClick={(s) => {
-                setSelectedService(s);
-                navigateTo('SERVICE_SELECTION');
-              }}
-            />
+  onConsultCustomized={() => {
+    const message =
+      "Olá! Quero consultar um Projeto Custom (Zeloo Black). Pode me explicar como funciona e quais benefícios estão inclusos?";
+
+    window.open(
+      `https://wa.me/5542988670973?text=${encodeURIComponent(message)}`,
+      "_blank",
+      "noreferrer"
+    );
+  }}
+  onServiceClick={(s) => {
+    setSelectedService(s);
+    navigateTo('SERVICE_SELECTION');
+  }}
+/>
+            
             <AIAssistant onOpenCounselor={() => navigateTo('SMART_COUNSELOR')} />
             <BudgetGenerator
               isLoggedIn={!!currentUser}
