@@ -1,3 +1,4 @@
+import { useAdminUniversalData } from '../useAdminUniversalData';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AdminProfile,
@@ -184,6 +185,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAdminReply,
   onUpdateUserStatus,
 }) => {
+  const universal = useAdminUniversalData();
   // evita warning de “unused props” caso ESLint seja chato
   void profile;
   void setProfile;
@@ -833,6 +835,7 @@ if (rs.ok) {
       </aside>
 
       <main className="flex-1 p-5 sm:p-8 md:p-16 overflow-y-auto">
+       
         {activeTab === 'OVERVIEW' && (
           <div className="animate-in fade-in space-y-12">
             <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tighter uppercase">
@@ -1365,6 +1368,142 @@ if (rs.ok) {
 
         {activeTab === 'CLIENTS' && (
           <div className="animate-in slide-in-from-right-10 space-y-8">
+            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-x-auto">
+  <div className="p-8 flex items-end justify-between gap-6 flex-wrap">
+    <div>
+      <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
+        Base de Assinantes (Universal)
+      </h2>
+      <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-2">
+        Dados vindos do Supabase • Sem localStorage
+      </p>
+    </div>
+
+    <div className="text-xs text-slate-600 font-bold">
+      Total: <span className="text-slate-900">{universal.clients.length}</span>
+    </div>
+  </div>
+
+  <div className="px-8 pb-8">
+    {universal.state === 'loading' && (
+      <div className="text-sm text-slate-500 font-bold">Carregando assinantes...</div>
+    )}
+
+    {universal.state === 'error' && (
+      <div className="text-sm text-red-600 font-bold">{universal.errorMsg}</div>
+    )}
+
+    {universal.state === 'ready' && (
+      <table className="min-w-[1100px] w-full text-left">
+        <thead className="bg-slate-50 border border-slate-100">
+          <tr>
+            <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Nome</th>
+            <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Email</th>
+            <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Plano</th>
+            <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Status</th>
+            <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Início</th>
+            <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Vencimento</th>
+            <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Ações</th>
+          </tr>
+        </thead>
+
+        <tbody className="divide-y divide-slate-100">
+          {universal.clients.map((c) => {
+            // ✅ status efetivo (deriva vencida por data)
+            const exp = c.subscription_expires_at ? new Date(c.subscription_expires_at).getTime() : null;
+            const now = Date.now();
+            const effectiveStatus =
+              c.subscription_status === 'BLOCKED'
+                ? 'BLOCKED'
+                : exp && now > exp
+                ? 'EXPIRED'
+                : exp
+                ? 'ACTIVE'
+                : (c.subscription_status || 'INACTIVE');
+
+            const statusLabel =
+              effectiveStatus === 'ACTIVE'
+                ? 'Ativa'
+                : effectiveStatus === 'EXPIRED'
+                ? 'Vencida'
+                : effectiveStatus === 'BLOCKED'
+                ? 'Bloqueada'
+                : 'Inativa';
+
+            const statusClass =
+              effectiveStatus === 'ACTIVE'
+                ? 'bg-green-50 text-green-700'
+                : effectiveStatus === 'EXPIRED'
+                ? 'bg-amber-50 text-amber-700'
+                : effectiveStatus === 'BLOCKED'
+                ? 'bg-red-50 text-red-700'
+                : 'bg-slate-100 text-slate-700';
+
+            const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '—');
+
+            return (
+              <tr key={c.id} className="hover:bg-slate-50/50">
+                <td className="px-6 py-5">
+                  <div className="font-black text-slate-900">{c.name || '—'}</div>
+                  <div className="text-[11px] text-slate-500 font-mono">{c.id}</div>
+                </td>
+
+                <td className="px-6 py-5 text-sm text-slate-700">{c.email || '—'}</td>
+
+                <td className="px-6 py-5">
+                  <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                    {c.plan_name || '—'}
+                  </span>
+                </td>
+
+                <td className="px-6 py-5">
+                  <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${statusClass}`}>
+                    {statusLabel}
+                  </span>
+                </td>
+
+                <td className="px-6 py-5 text-sm text-slate-700">{fmt(c.subscription_started_at)}</td>
+                <td className="px-6 py-5 text-sm text-slate-700">{fmt(c.subscription_expires_at)}</td>
+
+                <td className="px-6 py-5">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await universal.actions.activate30Days(c.id);
+                      }}
+                      className="px-4 py-2 rounded-2xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Ativar 30 dias
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await universal.actions.blockSubscription(c.id);
+                      }}
+                      className="px-4 py-2 rounded-2xl bg-red-600 text-white text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Bloquear assinatura
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+
+          {universal.clients.length === 0 && (
+            <tr>
+              <td colSpan={7} className="px-6 py-10 text-slate-500 font-bold">
+                Nenhum assinante encontrado.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    )}
+  </div>
+</div>
             <div className="flex items-end justify-between gap-6 flex-wrap">
               <h2 className="text-2xl font-black text-slate-900 uppercase">Base de Assinantes</h2>
 
