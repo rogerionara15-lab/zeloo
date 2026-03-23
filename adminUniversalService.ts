@@ -1,11 +1,10 @@
-import { supabase } from './services/supabaseClient';
+import { supabase } from "./services/supabaseClient";
 
+const TABLE_CLIENTS = "users"; // se sua tabela tiver outro nome, troque aqui
+const TABLE_EXTRAS = "extra_orders"; // se sua tabela tiver outro nome, troque aqui
 
-const TABLE_CLIENTS = 'users';        // se sua tabela tiver outro nome, troque aqui
-const TABLE_EXTRAS  = 'extra_orders'; // se sua tabela tiver outro nome, troque aqui
-
-export type SubscriptionStatus = 'ACTIVE' | 'BLOCKED' | 'EXPIRED' | 'INACTIVE';
-export type ExtraOrderStatus = 'PENDING' | 'PAID' | 'CANCELLED';
+export type SubscriptionStatus = "ACTIVE" | "BLOCKED" | "EXPIRED" | "INACTIVE";
+export type ExtraOrderStatus = "PENDING" | "PAID" | "CANCELLED";
 
 export type ClientRow = {
   id: string;
@@ -34,7 +33,8 @@ export type ExtraOrderRow = {
 export async function fetchClients(): Promise<ClientRow[]> {
   const { data, error } = await supabase
     .from(TABLE_CLIENTS)
-    .select(`
+    .select(
+      `
       id,
       name,
       email,
@@ -43,11 +43,27 @@ export async function fetchClients(): Promise<ClientRow[]> {
       subscription_started_at,
       subscription_expires_at,
       is_blocked
-    `)
-    .order('name', { ascending: true });
+    `,
+    )
+    .order("name", { ascending: true });
+  const today = new Date();
 
-  if (error) throw error;
-  return (data ?? []) as ClientRow[];
+  const updatedClients = (data ?? []).map((client) => {
+    if (!client.subscription_expires_at) return client;
+
+    const expiration = new Date(client.subscription_expires_at);
+
+    if (today > expiration && client.subscription_status === "ACTIVE")
+      return {
+        ...client,
+        subscription_status: "EXPIRED",
+        is_blocked: true,
+      };
+
+    return client;
+  });
+
+  return updatedClients as ClientRow[];
 }
 
 // =========================
@@ -57,14 +73,16 @@ export async function fetchClients(): Promise<ClientRow[]> {
 export async function fetchExtras(): Promise<ExtraOrderRow[]> {
   const { data, error } = await supabase
     .from(TABLE_EXTRAS)
-    .select(`
+    .select(
+      `
   id,
   user_id,
   unit_price,
   status,
   created_at
-`)
-    .order('created_at', { ascending: false });
+`,
+    )
+    .order("created_at", { ascending: false });
 
   if (error) throw error;
   return (data ?? []) as ExtraOrderRow[];
@@ -81,11 +99,11 @@ export async function activate30Days(userId: string): Promise<void> {
   const { error } = await supabase
     .from(TABLE_CLIENTS)
     .update({
-      subscription_status: 'ACTIVE',
+      subscription_status: "ACTIVE",
       subscription_started_at: startedAt.toISOString(),
       subscription_expires_at: expiresAt.toISOString(),
     })
-    .eq('id', userId);
+    .eq("id", userId);
 
   if (error) throw error;
 }
@@ -98,9 +116,9 @@ export async function blockSubscription(userId: string): Promise<void> {
   const { error } = await supabase
     .from(TABLE_CLIENTS)
     .update({
-      subscription_status: 'BLOCKED',
+      subscription_status: "BLOCKED",
     })
-    .eq('id', userId);
+    .eq("id", userId);
 
   if (error) throw error;
 }
@@ -113,9 +131,9 @@ export async function markExtraPaid(extraId: string): Promise<void> {
   const { error } = await supabase
     .from(TABLE_EXTRAS)
     .update({
-      status: 'PAID',
+      status: "PAID",
     })
-    .eq('id', extraId);
+    .eq("id", extraId);
 
   if (error) throw error;
 }
@@ -128,9 +146,9 @@ export async function cancelExtra(extraId: string): Promise<void> {
   const { error } = await supabase
     .from(TABLE_EXTRAS)
     .update({
-      status: 'CANCELLED',
+      status: "CANCELLED",
     })
-    .eq('id', extraId);
+    .eq("id", extraId);
 
   if (error) throw error;
 }
