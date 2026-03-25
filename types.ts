@@ -62,7 +62,7 @@ export interface MaintenanceRequest {
   description: string;
   isUrgent: boolean;
   status: ServiceStatus;
-  createdAt: string;
+  createdAt: string;rs
 
   adminReply?: string;
   visitCost?: number; // horas consumidas (ex: 3)
