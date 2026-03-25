@@ -1,0 +1,90 @@
+[33m6118411[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Refatoração do AdminDashboard: nova agenda inteligente, retorno do concierge e base de assinantes
+[33m6d5b5dd[m feat: implementar base de assinantes universal via Supabase (sem localStorage)
+[33m2f38265[m Simplifica Hero: remove cards flutuantes e status
+[33m39beefd[m Atualiza título e ajusta compatibilidade CSS
+[33med52fae[m Atualiza botão flutuante ⚡ para triagem via WhatsApp
+[33m78f0c4d[m Configura botão Projetos Custom para WhatsApp
+[33m94b7c28[m Update ContactConsultant: remove team + WhatsApp + mailto
+[33mf250538[m fix: restore extra visits modal checkout UI
+[33ma8ba340[m fix: revert extra modal changes and restore stable state
+[33mb0a49fb[m fix(admin): atualizar requests automaticamente para badge universal
+[33m1c21b9f[m fix(admin): incluir phone no mapeamento de users para agenda
+[33mda7c906[m feat(dashboard): salvar dados do cliente (telefone/endereco) no Supabase para agenda
+[33md1ecc2d[m feat: notificacao universal de novas O.S (lastSeen via API)
+[33mb513b7c[m fix(admin): badge O.S pendentes (status normalize + ignore archived)
+[33mb3d61bb[m fix(admin): normalize status and enable schedule/complete actions
+[33mb3aff60[m fix: admin actions status normalization
+[33mc5b7a93[m fix: create-request validation + dashboard quota sync
+[33m542caa5[m fix: quota calc and pt-BR date parse
+[33m13c75aa[m chore(api): remove health endpoints to fit Vercel Hobby limit
+[33m3cc7f84[m fix(api): corrigir request-invite e remover componente React de api
+[33ma9a7732[m chore: test deploy
+[33mdfec0dd[m feat(admin): reset mensal + agenda do cliente
+[33me254db5[m fix(admin): normalize status + reset mensal + agenda ficha cliente
+[33m90a0389[m fix(admin): normalize status + reset mensal + agenda ficha cliente
+[33ma441f0e[m Fix: atualização de status via API
+[33m7a5fca8[m Fix: normalizar status dos chamados para Admin
+[33m0633651[m Feat: criação de chamado via API segura + consumo automático de extras (RPC transacional)
+[33m17bcf1f[m Fix: não bloquear abertura de chamado no front; deixar RPC controlar extras
+[33m3d19a5d[m Fix: consumir extras ao abrir chamado via RPC
+[33mc04019b[m Fix: Minha Conta botões + responsivo mobile
+[33m4d86656[m fix: navigation to Cancelamento and FormasPagamento + cleanup duplicate views/props
+[33m98f64e0[m fix: dashboard counts extra visits and blocks new requests when quota is zero
+[33m214f5ae[m fix: extras sync + unblock route + monthly limit gate
+[33m8e1e5bb[m Fix extras payment: unify extra/extras and add MP webhook callback
+[33m21f8194[m fix: remove plano teste e corrigir pos-extra
+[33m497c02d[m fix: redirect extra purchase to pos-extra and credit user
+[33ma77a815[m feat: implement post-payment flow for extra visits
+[33mdb04e41[m fix: save password into password_hash (users table)
+[33m1572049[m fix: create users only after Supabase insert and prevent FK in requests
+[33mf292697[m fix: stop sending request id to avoid 409 conflict
+[33m6291bab[m refactor: remove localStorage from users/requests/chat and stabilize Supabase realtime sync
+[33m21bdc72[m feat: sync users/requests/chat with Supabase + realtime updates
+[33mc522c59[m fix: persist user before redirect on criar-conta
+[33mb040640[m Fix admin mobile + remove integration + concierge unread badge
+[33mdfcd9aa[m Add phone/address fields and save lead data before payment
+[33m35ac22c[m Remove extras version marker
+[33m14f1904[m Add version marker to confirm extras deploy
+[33m07ab462[m Fix extras route to return init_point (no local imports)
+[33m4ba877a[m Fix: extras redirect uses initPoint correctly
+[33m2ab9050[m Fix: add /api/extras alias route to extra
+[33m56c148a[m UX: show email confirmation guidance after signup
+[33mfa876f3[m Security: block account creation unless email is APPROVED
+[33m96b6655[m Feat: add invite link button for approved users
+[33me189955[m Fix: inline supabase admin client to avoid module not found on Vercel
+[33m91bb6d7[m Fix: supabaseAdmin module import for Vercel
+[33ma9263b4[m Fix: set node engines and simplify vercel config
+[33mf4867a9[m Fix: enable Vercel functions for /api routes
+[33m1730bce[m Fix: configure vercel functions with builds
+[33mae6aea0[m[33m ([m[1;32mfix/login-universal-auth-sync[m[33m)[m Fix: exclude /api from SPA rewrite
+[33me22d450[m Fix rewrites to allow /api routes
+[33m19bd190[m fix: universal login using paid_access approval (no localStorage dependency)
+[33m0ecfb8b[m chore: show supabase auth error message on login
+[33ma5a6c61[m feat: supabase auth login/signup (universal session)
+[33m18a9b11[m extras checkout
+[33m6a43c3f[m extras: open Mercado Pago checkout
+[33m473b444[m extras: open Mercado Pago checkout
+[33m0b2c325[m webhook: credit extra_visits from metadata
+[33m6ed2a13[m checkout: add metadata for plan vs extra visits
+[33m97eb1b7[m fix: remove tela branca e garantir rotas pos-pagamento sem router
+[33mea7ec16[m fix: fluxo pos-pagamento Mercado Pago + rotas reais + webhook completo
+[33mdae744c[m payment success: add pix confirm button
+[33ma86ada7[m fix webhook supabase insert (schema alignment)
+[33m027c572[m webhook: add robust parsing + logs + upsert paid_access
+[33m4feceb8[m checkout: add notification_url and redirect to post-payment
+[33m29abff8[m add R test plan
+[33m724ce48[m add Mercado Pago webhook to register paid emails
+[33m5459f28[m checkout pay-first: remove supabase session dependency
+[33mcc8042f[m fix checkout to use email and adjust payment flow
+[33md855ed8[m Use Mercado Pago checkout and send userId
+[33mb9385c4[m Add Mercado Pago webhook
+[33mbb8c51f[m Fix: trim Mercado Pago access token
+[33me2b7de8[m fix checkout types and return sandbox link
+[33m5561d1c[m add checkout api
+[33ma85e605[m trigger redeploy to apply env vars
+[33m70bc087[m organize project and document backend flow
+[33m2d4f92a[m add admin set paid endpoint
+[33m295eac5[m add supabase health endpoint
+[33mcfac785[m add vercel api ping
+[33m01cc8ee[m fix: app funcionando com Gemini no frontend e env configurada
+[33maab4096[m Primeiro deploy do Zeloo
